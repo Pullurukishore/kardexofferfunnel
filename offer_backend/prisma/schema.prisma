@@ -1,0 +1,448 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model with Admin and Zone User roles only
+model User {
+  id                      Int       @id @default(autoincrement())
+  email                   String    @unique
+  password                String
+  role                    UserRole  @default(ZONE_USER)
+  name                    String?
+  phone                   String?
+  shortForm               String?   @db.VarChar(5) // User short form for offer IDs (e.g., "AB", "JD")
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  lastLoginAt             DateTime?
+  isActive                Boolean   @default(true)
+  refreshToken            String?   @db.VarChar(255)
+  refreshTokenExpires     DateTime?
+  tokenVersion            String    @db.VarChar(36)
+  failedLoginAttempts     Int       @default(0)
+  accountLockedUntil      DateTime?
+  lastPasswordChange      DateTime? @default(now())
+  passwordResetToken      String?   @unique
+  passwordResetExpires    DateTime?
+  
+  // Relations
+  createdOffers           Offer[]         @relation("OfferCreatedBy")
+  updatedOffers           Offer[]         @relation("OfferUpdatedBy")
+  assignedOffers          Offer[]         @relation("OfferAssignedTo")
+  createdCustomers        Customer[]      @relation("CustomerCreatedBy")
+  updatedCustomers        Customer[]      @relation("CustomerUpdatedBy")
+  serviceZones            ServicePersonZone[] @relation("UserServiceZones")
+  auditLogs               AuditLog[]      @relation("UserAuditLogs")
+  createdSpareParts       SparePart[]     @relation("SparePartCreatedBy")
+  updatedSpareParts       SparePart[]     @relation("SparePartUpdatedBy")
+  userTargets             UserTarget[]    @relation("UserTargets")
+  createdZoneTargets      ZoneTarget[]    @relation("ZoneTargetCreatedBy")
+  updatedZoneTargets      ZoneTarget[]    @relation("ZoneTargetUpdatedBy")
+  createdUserTargets      UserTarget[]    @relation("UserTargetCreatedBy")
+  updatedUserTargets      UserTarget[]    @relation("UserTargetUpdatedBy")
+}
+
+// Service Zone (shared with KardexCare - EXACT match)
+model ServiceZone {
+  id             Int                 @id @default(autoincrement())
+  name           String
+  shortForm      String              @default("X") @db.VarChar(3) // Zone abbreviation for offer IDs (e.g., "W", "E", "N", "S")
+  description    String?
+  isActive       Boolean             @default(true)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  customers      Customer[]          @relation("CustomerZone")
+  servicePersons ServicePersonZone[] @relation("ServiceZonePersons")
+  offers         Offer[]             @relation("OfferZone")
+  zoneTargets    ZoneTarget[]        @relation("ZoneTargets")
+}
+
+model ServicePersonZone {
+  id            Int         @id @default(autoincrement())
+  userId        Int
+  serviceZoneId Int
+  createdAt     DateTime    @default(now())
+  
+  user          User        @relation("UserServiceZones", fields: [userId], references: [id])
+  serviceZone   ServiceZone @relation("ServiceZonePersons", fields: [serviceZoneId], references: [id])
+  
+  @@unique([userId, serviceZoneId])
+}
+
+// Customer model (kept as requested)
+model Customer {
+  id                    Int         @id @default(autoincrement())
+  companyName           String
+  location              String?     // Added as per your requirement
+  department            String?     // Added as per your requirement
+  registrationDate      DateTime?   // Added as per your requirement (reg date)
+  industry              String?
+  website               String?
+  address               String?
+  city                  String?
+  state                 String?
+  country               String?     @default("India")
+  pincode               String?
+  
+  // Zone assignment
+  zoneId                Int?
+  
+  // Tracking
+  createdById           Int
+  updatedById           Int
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  isActive              Boolean     @default(true)
+  
+  // Relations
+  zone                  ServiceZone? @relation("CustomerZone", fields: [zoneId], references: [id])
+  createdBy             User        @relation("CustomerCreatedBy", fields: [createdById], references: [id])
+  updatedBy             User        @relation("CustomerUpdatedBy", fields: [updatedById], references: [id])
+  contacts              Contact[]   @relation("CustomerContacts")
+  offers                Offer[]     @relation("CustomerOffers")
+  assets                Asset[]     @relation("CustomerAssets")
+  
+  @@index([companyName])
+  @@index([zoneId])
+}
+
+// Contact model (kept as requested)
+model Contact {
+  id                Int         @id @default(autoincrement())
+  customerId        Int
+  contactPersonName String      // Updated field name as per your requirement
+  contactNumber     String?     // Updated field name as per your requirement
+  email             String?     // As per your requirement
+  designation       String?
+  department        String?
+  role              ContactRole @default(CONTACT)
+  isPrimary         Boolean     @default(false)
+  isActive          Boolean     @default(true)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  // Relations
+  customer          Customer    @relation("CustomerContacts", fields: [customerId], references: [id])
+  offers            Offer[]     @relation("ContactOffers")
+  
+  @@index([customerId])
+  @@index([email])
+}
+
+// Asset model (kept as requested)
+model Asset {
+  id                    Int      @id @default(autoincrement())
+  customerId            Int
+  assetName             String
+  machineSerialNumber   String?  // Added as per your requirement
+  model                 String?
+  manufacturer          String?
+  location              String?
+  installationDate      DateTime?
+  warrantyExpiry        DateTime?
+  serviceContract       String?
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  // Relations
+  customer              Customer      @relation("CustomerAssets", fields: [customerId], references: [id])
+  offerAssets           OfferAsset[]  @relation("AssetToOffers")
+  
+  @@index([customerId])
+  @@index([machineSerialNumber])
+}
+
+// Main Offer model with all your required fields
+model Offer {
+  id                    Int              @id @default(autoincrement())
+  
+  // Basic Information
+  offerReferenceNumber  String           @unique // offer reference number
+  offerReferenceDate    DateTime?        // offer reference date
+  title                 String?
+  description           String?
+  productType           ProductType?     // product type
+  lead                  LeadStatus?      // lead
+  
+  // Customer Information (duplicated for easy access)
+  registrationDate      DateTime?        // reg date
+  company               String?          // company
+  location              String?          // location
+  department            String?          // department
+  
+  // Contact Information (duplicated for easy access)
+  contactPersonName     String?          // contact person name
+  contactNumber         String?          // contact number
+  email                 String?          // email
+  
+  // Asset Information (duplicated for easy access)
+  machineSerialNumber   String?          // machine serial number
+  
+  // Status & Progress
+  status                OfferStatus      @default(OPEN)
+  stage                 OfferStage       @default(INITIAL)
+  priority              Priority         @default(MEDIUM)
+  
+  // Customer & Contact
+  customerId            Int
+  contactId             Int
+  
+  // Financial Information
+  offerValue            Decimal?         @db.Decimal(12, 2) // Updated field name as per your requirement
+  offerMonth            String?          // Added as per your requirement (format: "YYYY-MM")
+  poExpectedMonth       String?          // Added as per your requirement (format: "YYYY-MM")
+  probabilityPercentage Int?             @db.SmallInt // Added as per your requirement (0-100)
+  
+  // PO Information
+  poNumber              String?          // Added as per your requirement
+  poDate                DateTime?        // Added as per your requirement
+  poValue               Decimal?         @db.Decimal(12, 2) // Added as per your requirement
+  poReceivedMonth       String?          // Added as per your requirement (format: "YYYY-MM")
+  
+  // Business Information
+  openFunnel            Boolean          @default(true) // Added as per your requirement
+  remarks               String?          // Added as per your requirement
+  
+  // System Dates
+  bookingDateInSap      DateTime?        // Added as per your requirement
+  offerEnteredInCrm     DateTime?        // Added as per your requirement
+  offerClosedInCrm      DateTime?        // Added as per your requirement
+  
+  // Assignment
+  zoneId                Int
+  assignedToId          Int?
+  
+  // Tracking
+  createdById           Int
+  updatedById           Int
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  
+  // Relations
+  customer              Customer         @relation("CustomerOffers", fields: [customerId], references: [id])
+  contact               Contact          @relation("ContactOffers", fields: [contactId], references: [id])
+  zone                  ServiceZone      @relation("OfferZone", fields: [zoneId], references: [id])
+  assignedTo            User?            @relation("OfferAssignedTo", fields: [assignedToId], references: [id])
+  createdBy             User             @relation("OfferCreatedBy", fields: [createdById], references: [id])
+  updatedBy             User             @relation("OfferUpdatedBy", fields: [updatedById], references: [id])
+  
+  // Many-to-many relationship with assets
+  offerAssets           OfferAsset[]     @relation("OfferToAssets")
+  // Many-to-many relationship with spare parts
+  offerSpareParts       OfferSparePart[] @relation("OfferToSpareParts")
+  auditLogs             AuditLog[]       @relation("OfferAuditLogs")
+  
+  @@index([customerId])
+  @@index([zoneId])
+  @@index([status])
+  @@index([stage])
+  @@index([assignedToId])
+  @@index([createdAt])
+  @@index([offerReferenceNumber])
+  @@index([poNumber])
+}
+
+// Junction table for Offer-Asset many-to-many relationship
+model OfferAsset {
+  id        Int      @id @default(autoincrement())
+  offerId   Int
+  assetId   Int
+  createdAt DateTime @default(now())
+  
+  // Relations
+  offer     Offer    @relation("OfferToAssets", fields: [offerId], references: [id], onDelete: Cascade)
+  asset     Asset    @relation("AssetToOffers", fields: [assetId], references: [id], onDelete: Cascade)
+  
+  @@unique([offerId, assetId])
+  @@index([offerId])
+  @@index([assetId])
+}
+
+// Audit log for tracking all changes
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  entityType  String   // e.g., "Offer", "Customer", "User"
+  entityId    String   // ID of the affected entity (can be offerReferenceNumber, customer ID, etc.)
+  action      String   // e.g., "CREATE", "UPDATE", "DELETE"
+  details     Json?    // JSON object with change details
+  userId      Int?     // User who performed the action
+  ipAddress   String?
+  userAgent   String?
+  offerId     Int?     // Direct reference to offer for easier querying
+  createdAt   DateTime @default(now())
+  
+  user        User?    @relation("UserAuditLogs", fields: [userId], references: [id])
+  offer       Offer?   @relation("OfferAuditLogs", fields: [offerId], references: [id])
+  
+  @@index([entityType])
+  @@index([entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([offerId])
+}
+
+// Spare Parts model for SSP product type
+model SparePart {
+  id              Int               @id @default(autoincrement())
+  name            String            // Spare part name
+  partNumber      String            @unique // Unique part number
+  description     String?           // Description of the spare part
+  category        String?           // Category (e.g., "Hardware", "Software", "Consumables")
+  basePrice       Decimal           @db.Decimal(10, 2) // Base price in INR
+  imageUrl        String?           // URL to spare part image
+  specifications  String?           // JSON string for technical specifications
+  status          SparePartStatus   @default(ACTIVE)
+  
+  // Tracking
+  createdById     Int
+  updatedById     Int
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  // Relations
+  createdBy       User              @relation("SparePartCreatedBy", fields: [createdById], references: [id])
+  updatedBy       User              @relation("SparePartUpdatedBy", fields: [updatedById], references: [id])
+  offerSpareParts OfferSparePart[]  @relation("SparePartToOffers")
+  
+  @@index([partNumber])
+  @@index([category])
+  @@index([status])
+  @@index([name])
+}
+
+// Junction table for Offer-SparePart relationship with custom pricing
+model OfferSparePart {
+  id          Int       @id @default(autoincrement())
+  offerId     Int
+  sparePartId Int
+  quantity    Int       @default(1)
+  unitPrice   Decimal   @db.Decimal(10, 2) // Custom price for this offer (can override base price)
+  totalPrice  Decimal   @db.Decimal(10, 2) // quantity * unitPrice
+  notes       String?   // Any specific notes for this spare part in this offer
+  createdAt   DateTime  @default(now())
+  
+  // Relations
+  offer       Offer     @relation("OfferToSpareParts", fields: [offerId], references: [id], onDelete: Cascade)
+  sparePart   SparePart @relation("SparePartToOffers", fields: [sparePartId], references: [id], onDelete: Cascade)
+  
+  @@unique([offerId, sparePartId])
+  @@index([offerId])
+  @@index([sparePartId])
+}
+
+// Target Management Models for Director/Admin
+model ZoneTarget {
+  id                 Int          @id @default(autoincrement())
+  serviceZoneId      Int
+  targetPeriod       String       // Format: "YYYY-MM" for monthly or "YYYY" for yearly
+  periodType         PeriodType   @default(MONTHLY)
+  productType        ProductType? // Optional: target for specific product type
+  targetValue        Decimal      @db.Decimal(12, 2) // Target revenue value
+  targetOfferCount   Int?         // Target number of offers (optional)
+  createdById        Int
+  updatedById        Int
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  
+  serviceZone        ServiceZone  @relation("ZoneTargets", fields: [serviceZoneId], references: [id])
+  createdBy          User         @relation("ZoneTargetCreatedBy", fields: [createdById], references: [id])
+  updatedBy          User         @relation("ZoneTargetUpdatedBy", fields: [updatedById], references: [id])
+  
+  @@unique([serviceZoneId, targetPeriod, periodType, productType])
+  @@index([serviceZoneId])
+  @@index([targetPeriod])
+  @@index([productType])
+}
+
+model UserTarget {
+  id                 Int          @id @default(autoincrement())
+  userId             Int
+  targetPeriod       String       // Format: "YYYY-MM" for monthly or "YYYY" for yearly
+  periodType         PeriodType   @default(MONTHLY)
+  productType        ProductType? // Optional: target for specific product type
+  targetValue        Decimal      @db.Decimal(12, 2) // Target revenue value
+  targetOfferCount   Int?         // Target number of offers (optional)
+  createdById        Int
+  updatedById        Int
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  
+  user               User         @relation("UserTargets", fields: [userId], references: [id])
+  createdBy          User         @relation("UserTargetCreatedBy", fields: [createdById], references: [id])
+  updatedBy          User         @relation("UserTargetUpdatedBy", fields: [updatedById], references: [id])
+  
+  @@unique([userId, targetPeriod, periodType, productType])
+  @@index([userId])
+  @@index([targetPeriod])
+  @@index([productType])
+}
+
+// Enums
+enum UserRole {
+  ADMIN
+  ZONE_USER
+}
+
+enum OfferStatus {
+  DRAFT
+  OPEN
+  IN_PROGRESS
+  QUOTED
+  NEGOTIATION
+  WON
+  LOST
+  ON_HOLD
+  CANCELLED
+}
+
+enum OfferStage {
+  INITIAL
+  PROPOSAL_SENT
+  NEGOTIATION
+  FINAL_APPROVAL
+  PO_RECEIVED
+  ORDER_BOOKED
+  WON
+  LOST
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ContactRole {
+  ACCOUNT_OWNER
+  CONTACT
+}
+
+enum ProductType {
+  RELOCATION
+  CONTRACT
+  SPP
+  UPGRADE_KIT
+  SOFTWARE
+}
+
+enum LeadStatus {
+  YES
+  NO
+}
+
+enum SparePartStatus {
+  ACTIVE
+  INACTIVE
+  DISCONTINUED
+}
+
+enum PeriodType {
+  MONTHLY
+  YEARLY
+}
