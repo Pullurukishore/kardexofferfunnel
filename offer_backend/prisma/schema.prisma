@@ -44,6 +44,7 @@ model User {
   updatedZoneTargets      ZoneTarget[]    @relation("ZoneTargetUpdatedBy")
   createdUserTargets      UserTarget[]    @relation("UserTargetCreatedBy")
   updatedUserTargets      UserTarget[]    @relation("UserTargetUpdatedBy")
+  stageRemarks            StageRemark[]   @relation("StageRemarkCreatedBy")
 }
 
 // Service Zone (shared with KardexCare - EXACT match)
@@ -236,6 +237,7 @@ model Offer {
   // Many-to-many relationship with spare parts
   offerSpareParts       OfferSparePart[] @relation("OfferToSpareParts")
   auditLogs             AuditLog[]       @relation("OfferAuditLogs")
+  stageRemarks          StageRemark[]    @relation("OfferStageRemarks")
   
   @@index([customerId])
   @@index([zoneId])
@@ -245,6 +247,9 @@ model Offer {
   @@index([createdAt])
   @@index([offerReferenceNumber])
   @@index([poNumber])
+  @@index([zoneId, stage]) // Composite index for zone-wise performance queries
+  @@index([createdById, createdAt]) // Composite index for user performance queries
+  @@index([customerId, stage]) // Composite index for customer performance queries
 }
 
 // Junction table for Offer-Asset many-to-many relationship
@@ -261,6 +266,24 @@ model OfferAsset {
   @@unique([offerId, assetId])
   @@index([offerId])
   @@index([assetId])
+}
+
+// Stage-wise remarks tracking for offers
+model StageRemark {
+  id          Int         @id @default(autoincrement())
+  offerId     Int
+  stage       OfferStage  // The stage when this remark was added
+  remarks     String      // The remark content
+  createdById Int
+  createdAt   DateTime    @default(now())
+  
+  // Relations
+  offer       Offer       @relation("OfferStageRemarks", fields: [offerId], references: [id], onDelete: Cascade)
+  createdBy   User        @relation("StageRemarkCreatedBy", fields: [createdById], references: [id])
+  
+  @@index([offerId])
+  @@index([stage])
+  @@index([createdAt])
 }
 
 // Audit log for tracking all changes
@@ -385,6 +408,7 @@ model UserTarget {
 // Enums
 enum UserRole {
   ADMIN
+  ZONE_MANAGER
   ZONE_USER
 }
 
@@ -429,6 +453,10 @@ enum ProductType {
   SPP
   UPGRADE_KIT
   SOFTWARE
+  BD_CHARGES
+  BD_SPARE
+  MIDLIFE_UPGRADE
+  RETROFIT_KIT
 }
 
 enum LeadStatus {

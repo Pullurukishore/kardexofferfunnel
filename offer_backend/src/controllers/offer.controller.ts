@@ -14,6 +14,13 @@ export class OfferController {
         return res.status(400).json({ error: 'Zone ID and product type are required' });
       }
 
+      // Zone users and zone managers can only request next reference for their own zone
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user.zoneId) {
+        if (parseInt(zoneId as string) !== parseInt(req.user.zoneId)) {
+          return res.status(403).json({ error: 'Access denied: zone mismatch' });
+        }
+      }
+
       const nextRef = await OfferController.generateOfferReferenceNumber(
         parseInt(zoneId as string),
         productType as string,
@@ -84,45 +91,23 @@ export class OfferController {
           }
 
           const companyPrefix = 'KRIND';
-          const zoneAbbr = zone.shortForm || 'X';
-          const productAbbr = productTypeMap[productType] || productType.substring(0, 3).toUpperCase();
+          const zoneAbbr = (zone.shortForm || 'X').toString().trim().toUpperCase();
+          // Derive a clean 3-letter product abbreviation (letters only)
+          const deriveAbbr = (val: string) => (val || '').replace(/[^A-Za-z]/g, '').toUpperCase();
+          const productAbbrRaw = productTypeMap[productType] || deriveAbbr(productType).substring(0, 3);
+          const productAbbr = productAbbrRaw && productAbbrRaw.length > 0 ? productAbbrRaw : 'GEN';
 
-          // Find ALL offers for this user in this zone to ensure unique sequence number
-          // The sequence number should be unique across all product types for the same user
-          const userPatternAcrossAllProducts = `${companyPrefix}/${zoneAbbr}/`;
-          
-          // Get all existing offers for this user across all product types
-          const existingOffers = await tx.offer.findMany({
-            where: {
-              offerReferenceNumber: {
-                startsWith: userPatternAcrossAllProducts,
-                contains: `/${userShortForm}` // Contains the user short form
-              }
-            },
-            select: {
-              offerReferenceNumber: true
-            },
-            orderBy: {
-              id: 'desc'
-            }
-          });
-
+          // Sequence should be continuous company-wide across ALL zones, users and product types
+          // Example: KRIND/S/SPP/AU00007 -> next anywhere is KRIND/R/CON/PU00008
+          // Compute max 5-digit suffix globally for KRIND prefix and increment
           let nextNumber = 1;
-          
-          if (existingOffers.length > 0) {
-            // Extract all sequence numbers for this user across ALL product types
-            const sequenceNumbers = existingOffers
-              .map(offer => {
-                // Match pattern: KRIND/Z/PRODUCT/USERxxxxx where xxxxx is the sequence number
-                const match = offer.offerReferenceNumber.match(new RegExp(`/${userShortForm}(\\d+)$`));
-                return match ? parseInt(match[1]) : 0;
-              })
-              .filter(num => num > 0);
-            
-            if (sequenceNumbers.length > 0) {
-              nextNumber = Math.max(...sequenceNumbers) + 1;
-            }
-          }
+          const globalMax: any = await tx.$queryRaw`
+            SELECT COALESCE(MAX(CAST(substring("offerReferenceNumber" FROM '([0-9]{5})$') AS INTEGER)), 0) AS "maxSeq"
+            FROM "Offer"
+            WHERE "offerReferenceNumber" LIKE ${`${companyPrefix}/%`}
+          `;
+          const maxSeq = Array.isArray(globalMax) ? Number(globalMax[0]?.maxSeq || 0) : Number((globalMax as any)?.maxSeq || 0);
+          nextNumber = (Number.isFinite(maxSeq) ? maxSeq : 0) + 1;
 
           // Generate the new offer reference number
           const newOfferRef = `${companyPrefix}/${zoneAbbr}/${productAbbr}/${userShortForm}${String(nextNumber).padStart(5, '0')}`;
@@ -166,7 +151,8 @@ export class OfferController {
         status, 
         stage, 
         customerId, 
-        assignedToId, 
+        assignedToId,
+        createdById, 
         search, 
         page = 1, 
         limit = 20,
@@ -179,8 +165,8 @@ export class OfferController {
 
       const where: any = {};
 
-      // Zone users can only see offers in their zone
-      if (req.user?.role === 'ZONE_USER' && req.user.zoneId) {
+      // Zone users and zone managers can only see offers in their zone
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user.zoneId) {
         where.zoneId = parseInt(req.user.zoneId);
       }
 
@@ -193,7 +179,8 @@ export class OfferController {
       if (stage) where.stage = stage;
       if (customerId) where.customerId = parseInt(customerId as string);
       if (assignedToId) where.assignedToId = parseInt(assignedToId as string);
-      if (productType) where.productType = { contains: productType as string, mode: 'insensitive' };
+      if (createdById) where.createdById = parseInt(createdById as string);
+      if (productType) where.productType = productType; // Enum field - use exact match
       if (offerMonth) where.offerMonth = offerMonth;
       if (poExpectedMonth) where.poExpectedMonth = poExpectedMonth;
       if (openFunnel !== undefined) where.openFunnel = openFunnel === 'true';
@@ -204,7 +191,6 @@ export class OfferController {
           { offerReferenceNumber: { contains: search as string, mode: 'insensitive' } },
           { company: { contains: search as string, mode: 'insensitive' } },
           { contactPersonName: { contains: search as string, mode: 'insensitive' } },
-          { productType: { contains: search as string, mode: 'insensitive' } },
           { poNumber: { contains: search as string, mode: 'insensitive' } },
         ];
       }
@@ -286,13 +272,13 @@ export class OfferController {
         where: { id: parseInt(id) },
         include: {
           customer: {
-            select: {
-              id: true,
-              companyName: true,
-              address: true,
-              city: true,
-              state: true,
-              industry: true,
+            include: {
+              contacts: {
+                where: {
+                  role: 'ACCOUNT_OWNER',
+                  isActive: true,
+                },
+              },
             },
           },
           contact: true,
@@ -324,6 +310,36 @@ export class OfferController {
               createdAt: 'asc',
             },
           },
+          offerAssets: {
+            include: {
+              asset: {
+                include: {
+                  customer: {
+                    select: {
+                      companyName: true,
+                    },
+                  },
+                },
+              },
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
+          stageRemarks: {
+            include: {
+              createdBy: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+            },
+            orderBy: {
+              createdAt: 'desc',
+            },
+          },
         },
       });
 
@@ -331,8 +347,8 @@ export class OfferController {
         return res.status(404).json({ error: 'Offer not found' });
       }
 
-      // Zone users can only access offers in their zone
-      if (req.user?.role === 'ZONE_USER' && req.user.zoneId) {
+      // Zone users and zone managers can only access offers in their zone
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user.zoneId) {
         if (offer.zoneId !== parseInt(req.user.zoneId)) {
           return res.status(403).json({ error: 'Access denied' });
         }
@@ -347,7 +363,7 @@ export class OfferController {
     }
   }
 
-  // Create new offer (admin only)
+  // Create new offer (both admin and zone users)
   static async createOffer(req: AuthRequest, res: Response) {
     try {
       const {
@@ -383,6 +399,27 @@ export class OfferController {
         poReceivedMonth,
         remarks,
       } = req.body;
+
+      // Zone users and zone managers can only create offers in their assigned zone
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER')) {
+        if (!req.user.zoneId) {
+          return res.status(400).json({ error: 'Zone ID is required for zone users' });
+        }
+        if (parseInt(zoneId) !== parseInt(req.user.zoneId)) {
+          return res.status(403).json({ error: 'Access denied: cannot create offer for a different zone' });
+        }
+      }
+
+      // Convert date strings to proper Date objects
+      let poDateObj = null;
+      if (poDate) {
+        if (typeof poDate === 'string' && poDate.length === 10) {
+          // If it's just a date (YYYY-MM-DD), convert to ISO DateTime
+          poDateObj = new Date(poDate + 'T00:00:00.000Z');
+        } else {
+          poDateObj = new Date(poDate);
+        }
+      }
 
       // Auto-generate offer reference number with the new structured format
       const autoGeneratedOfferRef = await OfferController.generateOfferReferenceNumber(
@@ -430,7 +467,7 @@ export class OfferController {
           
           // PO Information (optional for initial stage)
           poNumber,
-          poDate: poDate ? new Date(poDate) : null,
+          poDate: poDateObj,
           poValue: poValue ? parseFloat(poValue) : null,
           poReceivedMonth,
           
@@ -556,6 +593,14 @@ export class OfferController {
       const { id } = req.params;
       const updates = req.body;
 
+      // Convert date strings to ISO DateTime format
+      if (updates.poDate && typeof updates.poDate === 'string') {
+        // If it's just a date (YYYY-MM-DD), convert to ISO DateTime
+        if (updates.poDate.length === 10) {
+          updates.poDate = new Date(updates.poDate + 'T00:00:00.000Z').toISOString();
+        }
+      }
+
       const existingOffer = await prisma.offer.findUnique({
         where: { id: parseInt(id) },
       });
@@ -564,11 +609,47 @@ export class OfferController {
         return res.status(404).json({ error: 'Offer not found' });
       }
 
-      // Zone users can only update offers in their zone
-      if (req.user?.role === 'ZONE_USER' && req.user.zoneId) {
+      // Zone users and zone managers can only update offers in their zone
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user.zoneId) {
         if (existingOffer.zoneId !== parseInt(req.user.zoneId)) {
           return res.status(403).json({ error: 'Access denied' });
         }
+      }
+
+      // Check if stage is changing and remarks are provided
+      const isStageChanging = updates.stage && updates.stage !== existingOffer.stage;
+      const hasRemarks = updates.remarks && updates.remarks.trim();
+
+      // If stage is changing and remarks are provided, save stage-specific remarks
+      if (isStageChanging && hasRemarks) {
+        await prisma.stageRemark.create({
+          data: {
+            offerId: parseInt(id),
+            stage: updates.stage,
+            remarks: updates.remarks.trim(),
+            createdById: req.user!.id,
+          },
+        });
+        
+        logger.info(`Stage remark saved for offer ${id}, stage: ${updates.stage}`);
+        
+        // Clear the remarks field after saving to StageRemark to avoid duplication
+        updates.remarks = null;
+      } else if (!isStageChanging && hasRemarks) {
+        // If stage is NOT changing but remarks are provided, save for current stage
+        await prisma.stageRemark.create({
+          data: {
+            offerId: parseInt(id),
+            stage: existingOffer.stage,
+            remarks: updates.remarks.trim(),
+            createdById: req.user!.id,
+          },
+        });
+        
+        logger.info(`Stage remark updated for offer ${id}, stage: ${existingOffer.stage}`);
+        
+        // Clear the remarks field after saving to StageRemark
+        updates.remarks = null;
       }
 
       const offer = await prisma.offer.update({
@@ -621,8 +702,8 @@ export class OfferController {
         return res.status(404).json({ error: 'Offer not found' });
       }
 
-      // Zone users can only update offers in their zone
-      if (req.user?.role === 'ZONE_USER' && req.user.zoneId) {
+      // Zone users and zone managers can only update offers in their zone
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user.zoneId) {
         if (existingOffer.zoneId !== parseInt(req.user.zoneId)) {
           return res.status(403).json({ error: 'Access denied' });
         }
@@ -717,8 +798,8 @@ export class OfferController {
         return res.status(404).json({ error: 'Offer not found' });
       }
 
-      // Zone users can only add notes to offers in their zone
-      if (req.user?.role === 'ZONE_USER' && req.user.zoneId) {
+      // Zone users and zone managers can only add notes to offers in their zone
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user.zoneId) {
         if (offer.zoneId !== parseInt(req.user.zoneId)) {
           return res.status(403).json({ error: 'Access denied' });
         }

@@ -4,18 +4,21 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { Request, Response, NextFunction } from 'express';
+import { prisma } from './lib/prisma';
 // Route imports
 import authRoutes from './routes/auth.routes';
 import offerRoutes from './routes/offer.routes';
 import customerRoutes from './routes/customer.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import adminRoutes from './routes/admin.routes';
+import assetRoutes from './routes/asset.routes';
 import sparePartRoutes from './routes/sparePart.routes';
 import auditRoutes from './routes/audit.routes';
 import activityRoutes from './routes/activity.routes';
 import reportsRoutes from './routes/reports.routes';
 import userRoutes from './routes/user.routes';
 import targetRoutes from './routes/target.routes';
+import forecastRoutes from './routes/forecast.routes';
 
 const app = express();
 
@@ -69,16 +72,47 @@ app.use('/api/offers', offerRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/assets', assetRoutes);
 app.use('/api/spare-parts', sparePartRoutes);
 app.use('/api/audit', auditRoutes); // Audit logs (alias for activities)
 app.use('/api/activities', activityRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/targets', targetRoutes);
+app.use('/api/forecasts', forecastRoutes);
 
 // Health check
 app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', service: 'offer-funnel-api' });
+});
+
+// Database connection health check for monitoring
+app.get('/health/db', async (req: Request, res: Response) => {
+  try {
+    // Test database connection
+    await prisma.$queryRaw`SELECT 1`;
+    
+    // Get connection pool stats
+    const poolStats = (prisma as any)._engineConfig?.datasources?.db;
+    
+    res.json({ 
+      status: 'healthy', 
+      database: 'connected',
+      connections: {
+        limit: poolStats?.connectionLimit || 'unknown',
+        timeout: poolStats?.poolTimeout || 'unknown',
+        idleTimeout: poolStats?.idleTimeout || 'unknown'
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'error', 
+      database: 'disconnected',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // 404 handler

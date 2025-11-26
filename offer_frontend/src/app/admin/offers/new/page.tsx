@@ -61,9 +61,9 @@ export default function NewOfferPage() {
   )
   
   const filteredContacts = contacts.filter(contact =>
-    contact.name?.toLowerCase().includes(contactSearch.toLowerCase()) ||
+    contact.contactPersonName?.toLowerCase().includes(contactSearch.toLowerCase()) ||
     contact.email?.toLowerCase().includes(contactSearch.toLowerCase()) ||
-    contact.phone?.includes(contactSearch)
+    contact.contactNumber?.includes(contactSearch)
   )
   
   const filteredAssets = assets.filter(asset =>
@@ -598,9 +598,9 @@ export default function NewOfferPage() {
                               <div className="flex items-center space-x-2">
                                 <Users className="h-3 w-3 text-purple-500" />
                                 <div className="flex flex-col">
-                                  <span className="font-medium">{contact.name}</span>
+                                  <span className="font-medium">{contact.contactPersonName}</span>
                                   <div className="flex items-center space-x-2 text-xs text-gray-500">
-                                    {contact.phone && <span>{contact.phone}</span>}
+                                    {contact.contactNumber && <span>{contact.contactNumber}</span>}
                                     {contact.email && <span>{contact.email}</span>}
                                   </div>
                                 </div>
@@ -779,6 +779,10 @@ export default function NewOfferPage() {
                     <SelectItem value="SPP">SPP (Spare Parts)</SelectItem>
                     <SelectItem value="UPGRADE_KIT">Upgrade Kit</SelectItem>
                     <SelectItem value="SOFTWARE">Software</SelectItem>
+                    <SelectItem value="BD_CHARGES">BD Charges</SelectItem>
+                    <SelectItem value="BD_SPARE">BD Spare</SelectItem>
+                    <SelectItem value="MIDLIFE_UPGRADE">Midlife Upgrade</SelectItem>
+                    <SelectItem value="RETROFIT_KIT">Retrofit Kit</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

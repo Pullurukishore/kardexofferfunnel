@@ -173,7 +173,7 @@ export class SparePartController {
       await AuditService.log({
         action: 'SPARE_PART_CREATED',
         entityType: 'SparePart',
-        entityId: sparePart.id,
+        entityId: sparePart.id.toString(),
         userId: req.user!.id,
         details: { name: sparePart.name, partNumber: sparePart.partNumber },
         ipAddress: req.ip,
@@ -251,10 +251,9 @@ export class SparePartController {
       await AuditService.log({
         action: 'SPARE_PART_UPDATED',
         entityType: 'SparePart',
-        entityId: sparePart.id,
+        entityId: sparePart.id.toString(),
         userId: req.user!.id,
-        oldValue: existingSparePart,
-        newValue: updates,
+        details: { oldValue: existingSparePart, newValue: updates },
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
       });
@@ -293,7 +292,7 @@ export class SparePartController {
       await AuditService.log({
         action: 'SPARE_PART_DELETED',
         entityType: 'SparePart',
-        entityId: parseInt(id),
+        entityId: id,
         userId: req.user!.id,
         details: { name: sparePart.name, partNumber: sparePart.partNumber },
         ipAddress: req.ip,

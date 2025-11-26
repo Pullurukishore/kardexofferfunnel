@@ -109,20 +109,19 @@ npm run dev
 
 3. **Set up frontend:**
 ```bash
-cd ../frontend
 npm install
 cp .env.example .env.local
 npm run dev
-```
 
-4. **Access the application:**
+4. **Access your application:**
 - Frontend: http://localhost:3002
-- Backend API: http://localhost:5001
+- Backend API: http://localhost:5002
 - Login: admin@offerfunnel.com / admin123
 
 For detailed setup instructions, see [SETUP.md](./SETUP.md)
 
 ## Database Schema
+{{ ... }}
 
 ### Core Models
 
@@ -268,6 +267,29 @@ NEXT_PUBLIC_API_URL=http://localhost:5001/api
 **⚠️ Change these credentials in production!**
 
 ## Deployment
+
+### Windows Service Setup (Recommended)
+
+Run both frontend and backend as Windows services for automatic startup:
+
+**Quick Setup (Run as Administrator):**
+```powershell
+cd "c:\offer funnel"
+.\install-services-nssm.ps1
+```
+
+This uses **NSSM** (Non-Sucking Service Manager) to:
+- ✅ Auto-start on boot
+- ✅ Auto-restart on crashes  
+- ✅ Built-in log rotation
+- ✅ Easy management via GUI or CLI
+
+**Uninstall:**
+```powershell
+.\uninstall-services-nssm.ps1
+```
+
+**Full Documentation:** See [NSSM_SERVICE_GUIDE.md](./NSSM_SERVICE_GUIDE.md)
 
 ### Production Checklist
 

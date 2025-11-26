@@ -1,98 +1,65 @@
-'use client';
-
 import { Button } from '@/components/ui/button';
-import { Plus, Loader2 } from 'lucide-react';
-import { apiService } from '@/services/api';
-import { useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { Plus } from 'lucide-react';
 import CustomerClient from '@/components/customer/CustomerClient';
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 
-export default function CustomersPage() {
-  const searchParams = useSearchParams();
-  const search = searchParams.get('search') || '';
-  const status = searchParams.get('status') || 'all';
-  const page = searchParams.get('page') || '1';
+async function getCustomers(searchParams: any) {
+  try {
+    const cookieStore = cookies();
+    const token = cookieStore.get('accessToken')?.value || cookieStore.get('token')?.value;
+    
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api';
+    
+    const queryParams = new URLSearchParams();
+    queryParams.append('limit', '1000');
+    
+    if (searchParams.search) queryParams.append('search', searchParams.search);
+    if (searchParams.status && searchParams.status !== 'all') queryParams.append('status', searchParams.status);
+    
+    const response = await fetch(`${API_URL}/customers?${queryParams.toString()}`, {
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      cache: 'no-store',
+    });
 
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [stats, setStats] = useState<any>({
-    total: 0,
-    active: 0,
-    inactive: 0,
-    totalOffers: 0,
-    totalContacts: 0,
-    totalAssets: 0
-  });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+    if (!response.ok) {
+      throw new Error('Failed to fetch customers');
+    }
 
-  useEffect(() => {
-    const loadCustomers = async () => {
-      try {
-        setLoading(true);
-        setError(false);
-        
-        const queryParams: any = {
-          limit: 1000 // High limit to get all customers
-        };
-        
-        if (search) queryParams.search = search;
-        if (status && status !== 'all') queryParams.status = status;
-        
-        const response = await apiService.getCustomers(queryParams);
-        const allCustomers = response.customers || response.data || response || [];
-        
-        setCustomers(allCustomers);
-        
-        // Calculate stats
-        const newStats = {
-          total: allCustomers.length,
-          active: allCustomers.filter((c: any) => c.isActive !== false).length,
-          inactive: allCustomers.filter((c: any) => c.isActive === false).length,
-          totalOffers: allCustomers.reduce((sum: number, c: any) => sum + (c._count?.offers || 0), 0),
-          totalContacts: allCustomers.reduce((sum: number, c: any) => sum + (c._count?.contacts || 0), 0),
-          totalAssets: allCustomers.reduce((sum: number, c: any) => sum + (c._count?.assets || 0), 0)
-        };
-        setStats(newStats);
-      } catch (error) {
-        console.error('Error fetching customers:', error);
-        setError(true);
-      } finally {
-        setLoading(false);
-      }
+    const data = await response.json();
+    const allCustomers = data.customers || data.data || data || [];
+    
+    // Calculate stats
+    const stats = {
+      total: allCustomers.length,
+      active: allCustomers.filter((c: any) => c.isActive !== false).length,
+      inactive: allCustomers.filter((c: any) => c.isActive === false).length,
+      totalOffers: allCustomers.reduce((sum: number, c: any) => sum + (c._count?.offers || 0), 0),
+      totalContacts: allCustomers.reduce((sum: number, c: any) => sum + (c._count?.contacts || 0), 0),
+      totalAssets: allCustomers.reduce((sum: number, c: any) => sum + (c._count?.assets || 0), 0)
     };
-
-    loadCustomers();
-  }, [search, status, page]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <span className="ml-2">Loading customers...</span>
-      </div>
-    );
+    
+    return { customers: allCustomers, stats };
+  } catch (error) {
+    console.error('Error fetching customers:', error);
+    return { customers: [], stats: { total: 0, active: 0, inactive: 0, totalOffers: 0, totalContacts: 0, totalAssets: 0 } };
   }
+}
 
-  if (error) {
+export default async function CustomersPage({
+  searchParams,
+}: {
+  searchParams: { search?: string; status?: string; page?: string }
+}) {
+  const search = searchParams.search || '';
+  const status = searchParams.status || 'all';
+  const page = searchParams.page || '1';
 
-    return (
-      <div>
-        <div className="text-center py-12">
-          <div className="mx-auto h-24 w-24 rounded-full bg-gradient-to-br from-red-100 to-red-100 flex items-center justify-center mb-4">
-            <div className="h-12 w-12 text-red-500">⚠️</div>
-          </div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Error loading customers</h3>
-          <p className="text-gray-500 mb-6">
-            Failed to load customers. Please try again later.
-          </p>
-          <Button variant="outline" onClick={() => window.location.reload()}>
-            Retry
-          </Button>
-        </div>
-      </div>
-    );
-  }
+  const { customers, stats } = await getCustomers({ search, status, page });
 
   return (
     <div className="space-y-6">
@@ -135,7 +102,7 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      {/* Client Component for API calls */}
+      {/* Client Component for interactivity */}
       <CustomerClient 
         initialCustomers={customers}
         initialStats={stats}

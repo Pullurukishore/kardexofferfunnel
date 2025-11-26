@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { apiService } from '@/services/api';
-import { ArrowLeft, Target, Save, Package, TrendingUp } from 'lucide-react';
+import { ArrowLeft, Target, Save, Package, TrendingUp, AlertCircle, BarChart3 } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface Target {
   id: number;
@@ -47,7 +48,7 @@ export default function EditTargetPage() {
   const [showProductTypes, setShowProductTypes] = useState(false);
   
   // Product types from backend enum
-  const productTypes = ['RELOCATION', 'CONTRACT', 'SPP', 'UPGRADE_KIT', 'SOFTWARE'];
+  const productTypes = ['RELOCATION', 'CONTRACT', 'SPP', 'UPGRADE_KIT', 'SOFTWARE', 'BD_CHARGES', 'BD_SPARE', 'MIDLIFE_UPGRADE', 'RETROFIT_KIT'];
   const [productTargets, setProductTargets] = useState<{ [key: string]: string }>({});
 
   useEffect(() => {
@@ -114,7 +115,8 @@ export default function EditTargetPage() {
       }
       
     } catch (error: any) {
-      alert(error.response?.data?.message || 'Failed to fetch targets');
+      console.error('Failed to fetch targets:', error);
+      toast.error(error.response?.data?.message || 'Failed to fetch targets');
     } finally {
       setLoading(false);
     }
@@ -165,7 +167,7 @@ export default function EditTargetPage() {
         });
 
         if (targetsToCreate.length === 0) {
-          alert('Please enter at least one target value');
+          toast.error('Please enter at least one target value');
           setSaving(false);
           return;
         }
@@ -222,18 +224,19 @@ export default function EditTargetPage() {
       }
 
       if (errors.length > 0) {
-        alert(`Updated ${successCount} targets. Errors: ${errors.join(', ')}`);
+        toast.warning(`Updated ${successCount} targets. Some errors occurred: ${errors.join(', ')}`);
       } else {
-        alert(`Successfully updated ${successCount} target(s)!`);
+        toast.success(`Successfully ${isCreatingNew ? 'created' : 'updated'} ${successCount} target(s)!`);
       }
 
       // Navigate back to targets page
       setTimeout(() => {
         router.push(`/admin/targets?type=${targetType}&period=${targetPeriod}&periodType=${periodType}`);
-      }, 1000);
+      }, 1500);
       
     } catch (error: any) {
-      alert('Failed to update targets: ' + (error.response?.data?.message || error.message));
+      console.error('Failed to update targets:', error);
+      toast.error('Failed to update targets: ' + (error.response?.data?.message || error.message));
     } finally {
       setSaving(false);
     }
@@ -297,247 +300,279 @@ export default function EditTargetPage() {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit}>
-          <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden mb-6">
-            <div className="bg-gradient-to-r from-slate-50 to-slate-100 px-6 py-4 border-b border-slate-200">
-              <div className="flex items-center gap-3">
-                <TrendingUp className="w-6 h-6 text-green-600" />
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900">{isCreatingNew ? 'Set Target Values' : 'Update Target Values'}</h2>
-                  <p className="text-sm text-slate-600">{isCreatingNew ? 'Set the yearly target values below' : 'Modify the yearly target values below'}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-6">
-              {isCreatingNew ? (
-                // Create new target form
-                <div className="space-y-6">
-                  {/* Overall Target */}
-                  <div className="border-2 border-slate-200 rounded-xl p-6 hover:border-green-300 transition-all">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-10 h-10 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-bold">
-                        <Package className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-bold text-slate-900">Overall Target</h3>
-                        <p className="text-sm text-slate-500">Set target for all product types combined</p>
-                      </div>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {isCreatingNew ? (
+            // Create new target form
+            <>
+              {/* Overall Target Card */}
+              <div className="bg-white rounded-2xl shadow-xl border-2 border-emerald-200 overflow-hidden hover:shadow-2xl transition-all">
+                <div className="bg-gradient-to-r from-emerald-500 to-green-500 px-6 py-4">
+                  <div className="flex items-center gap-3 text-white">
+                    <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
+                      <TrendingUp className="w-7 h-7" />
                     </div>
-
-                    <div className="max-w-md">
-                      <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-2">
-                          Target Value (₹)
-                        </label>
-                        <div className="relative">
-                          <span className="absolute left-4 top-4 text-slate-400 font-medium">₹</span>
-                          <input
-                            type="number"
-                            value={newTargetValue}
-                            onChange={(e) => setNewTargetValue(e.target.value)}
-                            className="w-full pl-10 pr-4 py-4 border-2 border-slate-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 text-lg font-semibold transition-all"
-                            min="0"
-                            step="0.01"
-                            placeholder="50,00,000"
-                          />
-                        </div>
-                      </div>
+                    <div>
+                      <h3 className="text-xl font-bold">Overall Target</h3>
+                      <p className="text-emerald-50 text-sm">Combined target for all product types</p>
                     </div>
                   </div>
+                </div>
+                <div className="p-8">
+                  <label className="block text-sm font-bold text-slate-700 mb-3">
+                    Target Value (₹)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xl">₹</span>
+                    <input
+                      type="number"
+                      value={newTargetValue}
+                      onChange={(e) => setNewTargetValue(e.target.value)}
+                      className="w-full pl-12 pr-6 py-5 border-2 border-slate-300 rounded-xl focus:ring-4 focus:ring-emerald-500/20 focus:border-emerald-500 text-2xl font-bold transition-all hover:border-emerald-400"
+                      min="0"
+                      step="0.01"
+                      placeholder="50,00,000"
+                    />
+                  </div>
+                </div>
+              </div>
 
-                  {/* Product-Specific Targets Toggle */}
-                  <div className="text-center">
+              {/* Product-Specific Targets Section */}
+              <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+                <div className="bg-gradient-to-r from-violet-500 to-purple-500 px-6 py-4">
+                  <div className="flex items-center justify-between text-white">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
+                        <Package className="w-7 h-7" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold">Product-Specific Targets</h3>
+                        <p className="text-violet-50 text-sm">Set targets for individual product types</p>
+                      </div>
+                    </div>
                     <button
                       type="button"
                       onClick={() => setShowProductTypes(!showProductTypes)}
-                      className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all font-semibold border border-blue-200"
+                      className="px-4 py-2 bg-white/20 hover:bg-white/30 backdrop-blur-sm rounded-lg transition-all font-semibold border border-white/30"
                     >
-                      {showProductTypes ? '- Hide Product-Specific Targets' : '+ Add Product-Specific Targets'}
+                      {showProductTypes ? 'Hide' : 'Show'}
                     </button>
                   </div>
-
-                  {/* Product-Specific Targets */}
-                  {showProductTypes && (
-                    <div className="space-y-4">
-                      <div className="text-center">
-                        <h4 className="text-lg font-bold text-slate-700 mb-2">Product-Specific Targets</h4>
-                        <p className="text-sm text-slate-500">Set individual targets for specific product types</p>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {productTypes.map((productType) => (
-                          <div key={productType} className="border-2 border-slate-200 rounded-xl p-4 hover:border-purple-300 transition-all">
-                            <div className="flex items-center gap-3 mb-3">
-                              <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-sm">
-                                <Package className="w-4 h-4" />
-                              </div>
-                              <div>
-                                <h4 className="font-bold text-slate-900">{productType}</h4>
-                                <p className="text-xs text-slate-500">Target for {productType} products</p>
-                              </div>
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-700 mb-1">
-                                Target Value (₹)
-                              </label>
-                              <div className="relative">
-                                <span className="absolute left-3 top-3 text-slate-400 text-sm">₹</span>
-                                <input
-                                  type="number"
-                                  value={productTargets[productType] || ''}
-                                  onChange={(e) => setProductTargets({
-                                    ...productTargets,
-                                    [productType]: e.target.value
-                                  })}
-                                  className="w-full pl-8 pr-3 py-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 font-semibold text-sm"
-                                  min="0"
-                                  step="0.01"
-                                  placeholder="20,00,000"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
-              ) : (
-                // Edit existing targets form
-                <div className="space-y-6">
-                  {/* Summary Section */}
-                  {targets.length > 0 && (
-                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border-2 border-blue-200">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                          <TrendingUp className="w-5 h-5 text-white" />
-                        </div>
-                        <h3 className="text-lg font-bold text-slate-900">Total Summary</h3>
-                      </div>
-                      
-                      <div className="grid grid-cols-3 gap-4">
-                        <div>
-                          <div className="text-sm font-semibold text-slate-600 mb-1">Total Target</div>
-                          <div className="text-2xl font-bold text-blue-600">
-                            ₹{targets.reduce((sum, t) => sum + t.targetValue, 0).toLocaleString()}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-sm font-semibold text-slate-600 mb-1">Total Actual</div>
-                          <div className="text-2xl font-bold text-green-600">
-                            ₹{targets.reduce((sum, t) => sum + (t.actualValue || 0), 0).toLocaleString()}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-sm font-semibold text-slate-600 mb-1">Overall Achievement</div>
-                          <div className={`text-2xl font-bold ${
-                            targets.reduce((sum, t) => sum + t.targetValue, 0) > 0 
-                              ? (targets.reduce((sum, t) => sum + (t.actualValue || 0), 0) / targets.reduce((sum, t) => sum + t.targetValue, 0)) * 100 >= 75 
-                                ? 'text-green-600' 
-                                : 'text-orange-600'
-                              : 'text-slate-400'
-                          }`}>
-                            {targets.reduce((sum, t) => sum + t.targetValue, 0) > 0 
-                              ? ((targets.reduce((sum, t) => sum + (t.actualValue || 0), 0) / targets.reduce((sum, t) => sum + t.targetValue, 0)) * 100).toFixed(1)
-                              : '0.0'
-                            }%
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  {/* Overall Target */}
-                  {targets.filter(t => !t.productType).map((target, index) => {
-                    const actualIndex = targets.findIndex(t => t.id === target.id);
-                    return (
-                      <div key={target.id} className="border-2 border-green-200 rounded-xl p-6 bg-gradient-to-br from-white to-green-50/30 hover:border-green-400 transition-all">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div className="w-10 h-10 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-bold">
-                            <Package className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <h3 className="text-lg font-bold text-slate-900">Overall Target</h3>
-                            <p className="text-sm text-slate-500">Target for all product types combined</p>
-                          </div>
-                        </div>
-
-                        <div className="max-w-md">
-                          <div>
-                            <label className="block text-sm font-bold text-slate-700 mb-2">
-                              Target Value (₹) <span className="text-red-500">*</span>
-                            </label>
-                            <div className="relative">
-                              <span className="absolute left-4 top-4 text-slate-400 font-medium">₹</span>
-                              <input
-                                type="number"
-                                value={target.targetValue}
-                                onChange={(e) => updateTarget(actualIndex, 'targetValue', e.target.value)}
-                                className="w-full pl-10 pr-4 py-4 border-2 border-slate-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 text-lg font-semibold transition-all"
-                                required
-                                min="0"
-                                step="0.01"
-                                placeholder="50,00,000"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {/* Product-Specific Targets */}
-                  {targets.filter(t => t.productType).length > 0 && (
-                    <div className="space-y-4">
-                      <div className="text-center">
-                        <h4 className="text-lg font-bold text-slate-700 mb-2">Product-Specific Targets</h4>
-                        <p className="text-sm text-slate-500">Edit individual targets for specific product types</p>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {targets.filter(t => t.productType).map((target, index) => {
-                          const actualIndex = targets.findIndex(t => t.id === target.id);
-                          return (
-                            <div key={target.id} className="border-2 border-purple-200 rounded-xl p-4 bg-gradient-to-br from-white to-purple-50/30 hover:border-purple-400 transition-all">
-                              <div className="flex items-center gap-3 mb-3">
-                                <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-sm">
-                                  <Package className="w-4 h-4" />
-                                </div>
-                                <div>
-                                  <h4 className="font-bold text-slate-900">{target.productType}</h4>
-                                  <p className="text-xs text-slate-500">Target for {target.productType} products</p>
-                                </div>
+                
+                {showProductTypes && (
+                  <div className="p-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {productTypes.map((productType) => (
+                        <div key={productType} className="group relative bg-gradient-to-br from-white to-purple-50/30 border-2 border-purple-200 rounded-xl p-5 hover:border-purple-400 hover:shadow-lg transition-all">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center shadow-md">
+                                <Package className="w-5 h-5 text-white" />
                               </div>
-
                               <div>
-                                <label className="block text-xs font-bold text-slate-700 mb-1">
-                                  Target Value (₹) <span className="text-red-500">*</span>
-                                </label>
-                                <div className="relative">
-                                  <span className="absolute left-3 top-3 text-slate-400 text-sm">₹</span>
-                                  <input
-                                    type="number"
-                                    value={target.targetValue}
-                                    onChange={(e) => updateTarget(actualIndex, 'targetValue', e.target.value)}
-                                    className="w-full pl-8 pr-3 py-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 font-semibold text-sm"
-                                    required
-                                    min="0"
-                                    step="0.01"
-                                    placeholder="20,00,000"
-                                  />
-                                </div>
+                                <h4 className="font-bold text-slate-900 text-sm">{productType}</h4>
                               </div>
                             </div>
-                          );
-                        })}
+                          </div>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">₹</span>
+                            <input
+                              type="number"
+                              value={productTargets[productType] || ''}
+                              onChange={(e) => setProductTargets({
+                                ...productTargets,
+                                [productType]: e.target.value
+                              })}
+                              className="w-full pl-8 pr-3 py-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 font-semibold text-sm hover:border-purple-300 transition-all"
+                              min="0"
+                              step="0.01"
+                              placeholder="Enter value"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            // Edit existing targets form
+            <>
+              {/* Summary Dashboard */}
+              {targets.length > 0 && (
+                <div className="bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 rounded-2xl shadow-2xl overflow-hidden">
+                  <div className="p-8">
+                    <div className="flex items-center gap-3 mb-6 text-white">
+                      <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
+                        <BarChart3 className="w-7 h-7" />
+                      </div>
+                      <h3 className="text-2xl font-bold">Performance Summary</h3>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-white/10 backdrop-blur-sm rounded-xl p-5 border border-white/20">
+                        <div className="text-blue-100 text-sm font-semibold mb-2">Total Target</div>
+                        <div className="text-3xl font-bold text-white">
+                          ₹{(targets.reduce((sum, t) => sum + t.targetValue, 0) / 10000000).toFixed(2)}Cr
+                        </div>
+                      </div>
+                      <div className="bg-white/10 backdrop-blur-sm rounded-xl p-5 border border-white/20">
+                        <div className="text-blue-100 text-sm font-semibold mb-2">Total Actual</div>
+                        <div className="text-3xl font-bold text-white">
+                          ₹{(targets.reduce((sum, t) => sum + (t.actualValue || 0), 0) / 10000000).toFixed(2)}Cr
+                        </div>
+                      </div>
+                      <div className="bg-white/10 backdrop-blur-sm rounded-xl p-5 border border-white/20">
+                        <div className="text-blue-100 text-sm font-semibold mb-2">Achievement</div>
+                        <div className="text-3xl font-bold text-white">
+                          {targets.reduce((sum, t) => sum + t.targetValue, 0) > 0 
+                            ? ((targets.reduce((sum, t) => sum + (t.actualValue || 0), 0) / targets.reduce((sum, t) => sum + t.targetValue, 0)) * 100).toFixed(1)
+                            : '0.0'
+                          }%
+                        </div>
                       </div>
                     </div>
-                  )}
+                  </div>
                 </div>
               )}
-            </div>
-          </div>
+              {/* Overall Target Card */}
+              {targets.filter(t => !t.productType).map((target) => {
+                const actualIndex = targets.findIndex(t => t.id === target.id);
+                return (
+                  <div key={target.id} className="bg-white rounded-2xl shadow-xl border-2 border-emerald-200 overflow-hidden hover:shadow-2xl transition-all">
+                    <div className="bg-gradient-to-r from-emerald-500 to-green-500 px-6 py-4">
+                      <div className="flex items-center gap-3 text-white">
+                        <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
+                          <TrendingUp className="w-7 h-7" />
+                        </div>
+                        <div>
+                          <h3 className="text-xl font-bold">Overall Target</h3>
+                          <p className="text-emerald-50 text-sm">Combined target for all product types</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="p-8">
+                      <label className="block text-sm font-bold text-slate-700 mb-3">
+                        Target Value (₹) <span className="text-red-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xl">₹</span>
+                        <input
+                          type="number"
+                          value={target.targetValue}
+                          onChange={(e) => updateTarget(actualIndex, 'targetValue', e.target.value)}
+                          className="w-full pl-12 pr-6 py-5 border-2 border-slate-300 rounded-xl focus:ring-4 focus:ring-emerald-500/20 focus:border-emerald-500 text-2xl font-bold transition-all hover:border-emerald-400"
+                          required
+                          min="0"
+                          step="0.01"
+                          placeholder="50,00,000"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Product-Specific Targets - Show all product types */}
+              <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+                <div className="bg-gradient-to-r from-violet-500 to-purple-500 px-6 py-4">
+                  <div className="flex items-center gap-3 text-white">
+                    <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
+                      <Package className="w-7 h-7" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold">Product-Specific Targets</h3>
+                      <p className="text-violet-50 text-sm">Edit targets for individual product types</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {productTypes.map((productType) => {
+                      const existingTarget = targets.find(t => t.productType === productType);
+                      const actualIndex = existingTarget ? targets.findIndex(t => t.id === existingTarget.id) : -1;
+                      const targetValue = existingTarget?.targetValue || 0;
+                      const hasTarget = !!existingTarget;
+                      const actualValue = existingTarget?.actualValue || 0;
+                      const achievement = targetValue > 0 ? (actualValue / targetValue) * 100 : 0;
+                      
+                      return (
+                        <div key={productType} className={`group relative rounded-xl p-5 transition-all ${
+                          hasTarget 
+                            ? 'bg-gradient-to-br from-white to-purple-50/50 border-2 border-purple-300 hover:border-purple-500 hover:shadow-xl' 
+                            : 'bg-gradient-to-br from-white to-slate-50/50 border-2 border-slate-200 hover:border-slate-300 hover:shadow-lg'
+                        }`}>
+                          {/* Header Section */}
+                          <div className="flex items-start gap-3 mb-4">
+                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 shadow-md ${
+                              hasTarget 
+                                ? 'bg-gradient-to-br from-purple-500 to-violet-500' 
+                                : 'bg-gradient-to-br from-slate-400 to-slate-500'
+                            }`}>
+                              <Package className="w-5 h-5 text-white" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h4 className="font-bold text-slate-900 text-sm break-words">{productType}</h4>
+                              {!hasTarget && (
+                                <span className="inline-block mt-1 text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-semibold">
+                                  No Target
+                                </span>
+                              )}
+                              {hasTarget && achievement > 0 && (
+                                <span className={`inline-block mt-1 text-xs font-semibold ${
+                                  achievement >= 100 ? 'text-green-600' :
+                                  achievement >= 75 ? 'text-yellow-600' : 'text-red-600'
+                                }`}>
+                                  {achievement.toFixed(0)}% achieved
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Input Section */}
+                          <div className="space-y-2">
+                            <label className="block text-xs font-semibold text-slate-700">
+                              Target Value (₹) {hasTarget && <span className="text-red-500">*</span>}
+                            </label>
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">₹</span>
+                              <input
+                                type="number"
+                                value={targetValue}
+                                onChange={(e) => {
+                                  if (hasTarget && actualIndex !== -1) {
+                                    updateTarget(actualIndex, 'targetValue', e.target.value);
+                                  }
+                                }}
+                                className={`w-full pl-8 pr-3 py-3 border-2 rounded-lg font-semibold text-sm transition-all ${
+                                  hasTarget
+                                    ? 'border-slate-300 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 hover:border-purple-300'
+                                    : 'border-slate-200 bg-slate-50 cursor-not-allowed'
+                                }`}
+                                required={hasTarget}
+                                min="0"
+                                step="0.01"
+                                placeholder={hasTarget ? "Enter value" : "Not set"}
+                                disabled={!hasTarget}
+                                title={!hasTarget ? "This product type has no target set. Create a new target to edit." : ""}
+                              />
+                            </div>
+                            {!hasTarget && (
+                              <p className="text-xs text-slate-500">
+                                💡 No target set for this product
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Action Buttons */}
           <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">

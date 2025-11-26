@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -59,6 +60,7 @@ interface ZoneData {
 }
 
 export default function ZonesPage() {
+  const router = useRouter();
   const [zones, setZones] = useState<ZoneData[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -121,15 +123,25 @@ export default function ZonesPage() {
   return (
     <div className="space-y-8 p-6">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-2">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Service Zones</h1>
-          <p className="text-slate-600 mt-1">
-            Manage and monitor zone performance across your organization
-          </p>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-3 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg">
+              <MapPin className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-4xl font-bold text-slate-900">Service Zones</h1>
+              <p className="text-slate-600 mt-1">
+                Manage and monitor zone performance across your organization
+              </p>
+            </div>
+          </div>
         </div>
         <div className="flex items-center gap-3">
-          <Button className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-lg">
+          <Button 
+            onClick={() => router.push("/admin/zones/new")}
+            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-lg h-11"
+          >
             <Plus className="h-4 w-4 mr-2" />
             Add Zone
           </Button>
@@ -137,7 +149,7 @@ export default function ZonesPage() {
       </div>
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -203,26 +215,6 @@ export default function ZonesPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
         >
-          <Card className="border-0 shadow-lg bg-gradient-to-br from-amber-50 to-orange-50">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
-                  <IndianRupee className="h-6 w-6 text-white" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-slate-600">Total Value</p>
-                  <p className="text-2xl font-bold text-slate-900">{formatCurrency(totalValue)}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-        >
           <Card className="border-0 shadow-lg bg-gradient-to-br from-rose-50 to-pink-50">
             <CardContent className="p-6">
               <div className="flex items-center gap-4">
@@ -232,26 +224,6 @@ export default function ZonesPage() {
                 <div>
                   <p className="text-sm font-medium text-slate-600">Total Offers</p>
                   <p className="text-2xl font-bold text-slate-900">{totalOffers}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
-        >
-          <Card className="border-0 shadow-lg bg-gradient-to-br from-teal-50 to-cyan-50">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center">
-                  <TrendingUp className="h-6 w-6 text-white" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-slate-600">Avg Win Rate</p>
-                  <p className="text-2xl font-bold text-slate-900">{avgWinRate.toFixed(1)}%</p>
                 </div>
               </div>
             </CardContent>
@@ -298,26 +270,28 @@ export default function ZonesPage() {
       </Card>
 
       {/* Zones Table */}
-      <Card className="border-0 shadow-lg">
-        <CardHeader className="pb-4">
-          <CardTitle className="flex items-center gap-2">
-            <BarChart3 className="h-5 w-5 text-blue-600" />
-            Zone Performance Overview
-          </CardTitle>
+      <Card className="border-0 shadow-xl overflow-hidden">
+        <CardHeader className="bg-gradient-to-r from-slate-50 to-slate-100 border-b pb-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg">
+              <BarChart3 className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <CardTitle className="text-xl">Zone Performance Overview</CardTitle>
+              <p className="text-sm text-slate-600 mt-1">All service zones and their key metrics</p>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="border-slate-200">
-                  <TableHead className="font-semibold">Zone</TableHead>
-                  <TableHead className="font-semibold">Status</TableHead>
-                  <TableHead className="font-semibold">Users</TableHead>
-                  <TableHead className="font-semibold">Offers</TableHead>
-                  <TableHead className="font-semibold">Total Value</TableHead>
-                  <TableHead className="font-semibold">Win Rate</TableHead>
-                  <TableHead className="font-semibold">Created</TableHead>
-                  <TableHead className="w-12"></TableHead>
+                <TableRow className="bg-slate-50 border-b-2 border-slate-200 hover:bg-slate-50">
+                  <TableHead className="font-bold text-slate-900 py-4">Zone</TableHead>
+                  <TableHead className="font-bold text-slate-900 py-4">Status</TableHead>
+                  <TableHead className="font-bold text-slate-900 py-4">Users</TableHead>
+                  <TableHead className="font-bold text-slate-900 py-4">Offers</TableHead>
+                  <TableHead className="font-bold text-slate-900 py-4">Created</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -327,27 +301,27 @@ export default function ZonesPage() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.05 }}
-                    className="border-slate-100 hover:bg-slate-50/50 transition-colors"
+                    className="border-b border-slate-100 hover:bg-blue-50/30 transition-all duration-200 group"
                   >
-                    <TableCell>
+                    <TableCell className="py-4">
                       <div className="flex items-start gap-3">
-                        <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center flex-shrink-0">
+                        <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center flex-shrink-0 group-hover:shadow-lg transition-shadow">
                           <MapPin className="h-5 w-5 text-white" />
                         </div>
                         <div>
-                          <p className="font-semibold text-slate-900">{zone.name}</p>
+                          <p className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{zone.name}</p>
                           {zone.description && (
                             <p className="text-sm text-slate-500 mt-0.5">{zone.description}</p>
                           )}
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="py-4">
                       <Badge
                         variant={zone.isActive ? "default" : "secondary"}
                         className={zone.isActive 
-                          ? "bg-green-100 text-green-800 border-green-200" 
-                          : "bg-slate-100 text-slate-600 border-slate-200"
+                          ? "bg-green-100 text-green-800 border-green-200 font-semibold" 
+                          : "bg-slate-100 text-slate-600 border-slate-200 font-semibold"
                         }
                       >
                         {zone.isActive ? (
@@ -363,86 +337,42 @@ export default function ZonesPage() {
                         )}
                       </Badge>
                     </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
+                    <TableCell className="py-4">
+                      <div className="flex items-center gap-3">
                         <div className="flex -space-x-2">
                           {zone.users.slice(0, 3).map((user, userIndex) => (
-                            <Avatar key={user.id} className="h-8 w-8 border-2 border-white">
-                              <AvatarFallback className="bg-gradient-to-br from-purple-500 to-pink-500 text-white text-xs">
+                            <Avatar key={user.id} className="h-8 w-8 border-2 border-white hover:shadow-md transition-shadow">
+                              <AvatarFallback className="bg-gradient-to-br from-purple-500 to-pink-500 text-white text-xs font-bold">
                                 {user.name?.charAt(0) || user.email?.charAt(0) || 'U'}
                               </AvatarFallback>
                             </Avatar>
                           ))}
                           {zone.users.length > 3 && (
-                            <div className="h-8 w-8 rounded-full bg-slate-200 border-2 border-white flex items-center justify-center text-xs font-medium text-slate-600">
+                            <div className="h-8 w-8 rounded-full bg-slate-300 border-2 border-white flex items-center justify-center text-xs font-bold text-slate-700 hover:shadow-md transition-shadow">
                               +{zone.users.length - 3}
                             </div>
                           )}
                         </div>
-                        <span className="text-sm font-medium text-slate-700">
-                          {zone.activeUsers} active
+                        <span className="text-sm font-bold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-full">
+                          {zone.activeUsers}
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="py-4">
                       <div className="flex items-center gap-2">
-                        <Activity className="h-4 w-4 text-slate-400" />
-                        <span className="font-semibold text-slate-900">{zone.totalOffers}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <IndianRupee className="h-4 w-4 text-green-600" />
-                        <span className="font-semibold text-slate-900">
-                          {formatCurrency(zone.totalValue)}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-sm font-semibold text-slate-900">{zone.winRate}%</span>
-                          </div>
-                          <div className="w-16 h-2 bg-slate-200 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-green-500 to-emerald-600 transition-all duration-300"
-                              style={{ width: `${Math.min(zone.winRate, 100)}%` }}
-                            />
-                          </div>
+                        <div className="p-2 bg-rose-100 rounded-lg">
+                          <Activity className="h-4 w-4 text-rose-600" />
                         </div>
+                        <span className="font-bold text-slate-900">{zone.totalOffers}</span>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="py-4">
                       <div className="flex items-center gap-2 text-slate-600">
-                        <Calendar className="h-4 w-4" />
-                        <span className="text-sm">
-                          {new Date(zone.createdAt).toLocaleDateString()}
+                        <Calendar className="h-4 w-4 text-slate-400" />
+                        <span className="text-sm font-medium">
+                          {new Date(zone.createdAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })}
                         </span>
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem>
-                            <User className="h-4 w-4 mr-2" />
-                            View Details
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <Users className="h-4 w-4 mr-2" />
-                            Manage Users
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <BarChart3 className="h-4 w-4 mr-2" />
-                            View Analytics
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
                     </TableCell>
                   </motion.tr>
                 ))}

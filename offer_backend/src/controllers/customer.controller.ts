@@ -20,8 +20,8 @@ export class CustomerController {
       const skip = (Number(page) - 1) * Number(limit);
       const where: any = {};
 
-      // Zone users can only see customers in their zones
-      if (req.user?.role === 'ZONE_USER' && req.user.zoneId) {
+      // Zone users and zone managers can only see customers in their zones
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user.zoneId) {
         where.zoneId = parseInt(req.user.zoneId);
       }
 
@@ -177,8 +177,8 @@ export class CustomerController {
         });
       }
 
-      // Zone users can only access customers in their zone
-      if (req.user?.role === 'ZONE_USER' && req.user.zoneId) {
+      // Zone users and zone managers can only access customers in their zone
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user.zoneId) {
         if (customer.zoneId !== parseInt(req.user.zoneId)) {
           return res.status(403).json({ 
             success: false,
@@ -282,7 +282,7 @@ export class CustomerController {
       await AuditService.log({
         action: 'CUSTOMER_CREATED',
         entityType: 'Customer',
-        entityId: customer.id,
+        entityId: customer.id.toString(),
         userId: req.user!.id,
         details: { companyName: customer.companyName },
         ipAddress: req.ip,
@@ -370,10 +370,9 @@ export class CustomerController {
       await AuditService.log({
         action: 'CUSTOMER_UPDATED',
         entityType: 'Customer',
-        entityId: customer.id,
+        entityId: customer.id.toString(),
         userId: req.user!.id,
-        oldValue: existingCustomer,
-        newValue: updates,
+        details: { oldValue: existingCustomer, newValue: updates },
         ipAddress: req.ip,
         userAgent: req.headers['user-agent']
       });
@@ -439,7 +438,7 @@ export class CustomerController {
       await AuditService.log({
         action: 'CUSTOMER_DELETED',
         entityType: 'Customer',
-        entityId: parseInt(id),
+        entityId: id,
         userId: req.user!.id,
         details: { companyName: customer.companyName },
         ipAddress: req.ip,
@@ -583,8 +582,8 @@ export class CustomerController {
         userId: req.user!.id,
         action: 'CREATE',
         entityType: 'Contact',
-        entityId: contact.id,
-        details: `Created contact: ${contactPersonName}`
+        entityId: contact.id.toString(),
+        details: { message: `Created contact: ${contactPersonName}` }
       });
 
       res.status(201).json({
@@ -614,12 +613,43 @@ export class CustomerController {
         },
         orderBy: {
           assetName: 'asc'
+        },
+        include: {
+          _count: { select: { offerAssets: true } },
+          customer: { select: { id: true, companyName: true } }
         }
+      });
+
+      // Derive counts by serial if relation is missing
+      const serials = Array.from(new Set(assets.map((a: any) => a.machineSerialNumber).filter(Boolean)));
+      let derivedCounts = new Map<string, number>();
+      if (serials.length > 0) {
+        const offerGroups = await prisma.offer.groupBy({
+          by: ['machineSerialNumber', 'customerId'],
+          where: {
+            customerId: parseInt(id),
+            machineSerialNumber: { in: serials as string[] }
+          },
+          _count: { _all: true },
+        });
+        derivedCounts = new Map(
+          offerGroups.map((g: any) => [`${g.machineSerialNumber}|${g.customerId}`, g._count._all])
+        );
+      }
+
+      const mapped = assets.map((a: any) => {
+        const key = `${a.machineSerialNumber}|${a.customerId}`;
+        const fallback = derivedCounts.get(key) || 0;
+        const offers = (a._count?.offerAssets ?? fallback) || 0;
+        return {
+          ...a,
+          _count: { ...(a._count ?? {}), offers }
+        };
       });
 
       res.json({
         success: true,
-        assets
+        assets: mapped
       });
       return;
     } catch (error) {
@@ -670,8 +700,8 @@ export class CustomerController {
         userId: req.user!.id,
         action: 'CREATE',
         entityType: 'Asset',
-        entityId: asset.id,
-        details: `Created asset: ${assetName}`
+        entityId: asset.id.toString(),
+        details: { message: `Created asset: ${assetName}` }
       });
 
       res.status(201).json({

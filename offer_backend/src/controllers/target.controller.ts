@@ -95,7 +95,7 @@ export class TargetController {
    */
   static async getZoneTargets(req: AuthRequest, res: Response) {
     try {
-      const { targetPeriod, periodType, grouped, actualValuePeriod } = req.query;
+      const { targetPeriod, periodType, grouped, actualValuePeriod, zoneId } = req.query;
 
       if (!targetPeriod || !periodType) {
         return res.status(400).json({
@@ -108,8 +108,11 @@ export class TargetController {
       const whereZones: any = { isActive: true };
       
       // For zone users, only show their zone
-      if (req.user?.role === 'ZONE_USER' && req.user?.zoneId) {
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user?.zoneId) {
         whereZones.id = parseInt(req.user.zoneId.toString());
+      } else if (zoneId && zoneId !== 'all') {
+        // For admin users, filter by selected zone if provided
+        whereZones.id = parseInt(zoneId as string);
       }
 
       const allZones = await prisma.serviceZone.findMany({
@@ -124,7 +127,7 @@ export class TargetController {
         periodType: periodType as any
       };
       
-      if (req.user?.role === 'ZONE_USER' && req.user?.zoneId) {
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user?.zoneId) {
         whereTargets.serviceZoneId = parseInt(req.user.zoneId.toString());
       }
 
@@ -181,18 +184,27 @@ export class TargetController {
             undefined // Overall performance (no product filter)
           );
 
+          const totalOffers = await TargetController.getZoneTotalOffers(
+            zone.id,
+            actualPeriod,
+            actualPeriodType,
+            undefined // Overall performance (no product filter)
+          );
+
           // If zone has targets, sum them up
           if (zoneTargets.length > 0) {
             const totalTargetValue = zoneTargets.reduce((sum: number, t: any) => sum + Number(t.targetValue), 0);
+            const isMonthlyView = actualValuePeriod && String(actualValuePeriod).includes('-');
             return {
               id: zoneTargets[0].id, // Use first target's ID
               serviceZoneId: zone.id,
-              targetPeriod: targetPeriod as string,
-              periodType: periodType as string,
+              targetPeriod: isMonthlyView ? (actualValuePeriod as string) : (targetPeriod as string),
+              periodType: isMonthlyView ? 'MONTHLY' : (periodType as string),
               serviceZone: zone,
-              targetValue: totalTargetValue,
+              targetValue: totalTargetValue, // Keep yearly value, will divide in grouped response if needed
               actualValue: actual.value,
               actualOfferCount: actual.count,
+              totalOffers: totalOffers,
               targetOfferCount: zoneTargets.reduce((sum: number, t: any) => sum + (t.targetOfferCount || 0), 0),
               achievement: totalTargetValue > 0 ? (actual.value / totalTargetValue) * 100 : 0,
               targetCount: zoneTargets.length
@@ -208,6 +220,7 @@ export class TargetController {
               targetValue: 0,
               actualValue: actual.value,
               actualOfferCount: actual.count,
+              totalOffers: totalOffers,
               targetOfferCount: 0,
               achievement: 0, // No target = 0% achievement
               targetCount: 0
@@ -233,6 +246,7 @@ export class TargetController {
               actualValue: 0,
               targetOfferCount: 0,
               actualOfferCount: 0,
+              totalOffers: 0,
               targetCount: 0
             };
           }
@@ -240,12 +254,55 @@ export class TargetController {
           groupedTargets[key].actualValue += target.actualValue;
           groupedTargets[key].targetOfferCount += (target.targetOfferCount || 0);
           groupedTargets[key].actualOfferCount += target.actualOfferCount;
+          groupedTargets[key].totalOffers += (target.totalOffers || 0);
           groupedTargets[key].targetCount += 1;
         });
 
-        const result = Object.values(groupedTargets).map((t: any) => ({
-          ...t,
-          achievement: t.targetValue > 0 ? (t.actualValue / t.targetValue) * 100 : 0
+        const result = await Promise.all(Object.values(groupedTargets).map(async (t: any) => {
+          // For monthly view, divide target by 12
+          const isMonthlyView = t.periodType === 'MONTHLY';
+          const displayTargetValue = isMonthlyView ? Math.round(t.targetValue / 12) : t.targetValue;
+          const variance = t.actualValue - displayTargetValue;
+          const variancePercentage = displayTargetValue > 0 ? (variance / displayTargetValue) * 100 : 0;
+          
+          // Get comprehensive metrics for this zone
+          const metrics = await TargetController.getZoneMetrics(
+            t.serviceZoneId,
+            t.targetPeriod,
+            t.periodType
+          );
+          
+          // Calculate achievement percentages
+          const achievement = displayTargetValue > 0 ? (t.actualValue / displayTargetValue) * 100 : 0;
+          const expectedAchievement = displayTargetValue > 0 ? (metrics.expectedOffers / displayTargetValue) * 100 : 0;
+
+          return {
+            id: t.id,
+            serviceZoneId: t.serviceZoneId,
+            targetPeriod: t.targetPeriod,
+            periodType: t.periodType,
+            serviceZone: t.serviceZone,
+            targetValue: displayTargetValue,
+            actualValue: t.actualValue,
+            targetOfferCount: t.targetOfferCount,
+            actualOfferCount: t.actualOfferCount,
+            totalOffers: t.totalOffers,
+            targetCount: t.targetCount,
+            achievement: achievement,
+            expectedAchievement: expectedAchievement,
+            variance: variance,
+            variancePercentage: variancePercentage,
+            // New comprehensive metrics
+            metrics: {
+              noOfOffers: metrics.totalOffers,
+              offersValue: metrics.totalOffersValue,
+              ordersReceived: metrics.ordersReceived,
+              expectedOffers: metrics.expectedOffers,
+              openFunnel: metrics.openFunnel,
+              orderBooking: metrics.orderBooking,
+              balanceBU: displayTargetValue - t.actualValue
+            }
+          };
         }));
 
         return res.json({
@@ -263,17 +320,22 @@ export class TargetController {
           
           // Skip if trying to use yearly period with monthly period type
           if (actualPeriodType === 'MONTHLY' && !actualPeriod.includes('-')) {
+            const isMonthlyView = actualValuePeriod && String(actualValuePeriod).includes('-');
+            const displayTargetValue = isMonthlyView ? Math.round(Number(target.targetValue) / 12) : Number(target.targetValue);
+            const variance = 0 - displayTargetValue;
             return {
               id: target.id,
               serviceZoneId: target.serviceZoneId,
               targetPeriod: target.targetPeriod,
               periodType: target.periodType,
               productType: target.productType,
-              targetValue: Number(target.targetValue),
+              targetValue: displayTargetValue,
               targetOfferCount: target.targetOfferCount,
               actualValue: 0,
               actualOfferCount: 0,
               achievement: 0,
+              variance: variance,
+              variancePercentage: displayTargetValue > 0 ? (variance / displayTargetValue) * 100 : 0,
               serviceZone: target.serviceZone
             };
           }
@@ -285,17 +347,23 @@ export class TargetController {
             target.productType // Include product type filter for individual targets
           );
 
+          // For monthly view, divide target by 12 before calculating variance
+          const isMonthlyView = actualValuePeriod && String(actualValuePeriod).includes('-');
+          const displayTargetValue = isMonthlyView ? Math.round(Number(target.targetValue) / 12) : Number(target.targetValue);
+          const variance = actual.value - displayTargetValue;
           return {
             id: target.id,
             serviceZoneId: target.serviceZoneId,
             targetPeriod: target.targetPeriod,
             periodType: target.periodType,
             productType: target.productType,
-            targetValue: Number(target.targetValue),
+            targetValue: displayTargetValue,
             targetOfferCount: target.targetOfferCount,
             actualValue: actual.value,
             actualOfferCount: actual.count,
-            achievement: Number(target.targetValue) > 0 ? (actual.value / Number(target.targetValue)) * 100 : 0,
+            achievement: displayTargetValue > 0 ? (actual.value / displayTargetValue) * 100 : 0,
+            variance: variance,
+            variancePercentage: displayTargetValue > 0 ? (variance / displayTargetValue) * 100 : 0,
             serviceZone: target.serviceZone
           };
         })
@@ -473,7 +541,7 @@ export class TargetController {
    */
   static async getUserTargets(req: AuthRequest, res: Response) {
     try {
-      const { targetPeriod, periodType, grouped, actualValuePeriod } = req.query;
+      const { targetPeriod, periodType, grouped, actualValuePeriod, zoneId } = req.query;
 
       if (!targetPeriod || !periodType) {
         return res.status(400).json({
@@ -482,24 +550,43 @@ export class TargetController {
         });
       }
 
-      // Get ALL active zone users first
+      // Get ALL active zone users and zone managers
       const whereUsers: any = { 
         isActive: true,
-        role: 'ZONE_USER'
+        role: { in: ['ZONE_USER', 'ZONE_MANAGER'] }
       };
       
-      // For zone users, only show users in their zone
-      if (req.user?.role === 'ZONE_USER' && req.user?.zoneId) {
+      // For zone managers viewing their zone, also include zone manager targets
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user?.zoneId) {
         whereUsers.serviceZones = {
           some: {
             serviceZoneId: parseInt(req.user.zoneId.toString())
+          }
+        };
+      } else if (zoneId && zoneId !== 'all') {
+        // For admin users, filter by selected zone if provided
+        whereUsers.serviceZones = {
+          some: {
+            serviceZoneId: parseInt(zoneId as string)
           }
         };
       }
 
       const allUsers = await prisma.user.findMany({
         where: whereUsers,
-        select: { id: true, name: true, email: true, role: true },
+        select: { 
+          id: true, 
+          name: true, 
+          email: true, 
+          role: true,
+          serviceZones: {
+            select: {
+              serviceZone: {
+                select: { id: true, name: true }
+              }
+            }
+          }
+        },
         orderBy: { name: 'asc' }
       });
 
@@ -509,7 +596,7 @@ export class TargetController {
         periodType: periodType as any
       };
       
-      if (req.user?.role === 'ZONE_USER' && req.user?.zoneId) {
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user?.zoneId) {
         whereTargets.user = {
           serviceZones: {
             some: {
@@ -523,7 +610,19 @@ export class TargetController {
         where: whereTargets,
         include: {
           user: {
-            select: { id: true, name: true, email: true, role: true }
+            select: { 
+              id: true, 
+              name: true, 
+              email: true, 
+              role: true,
+              serviceZones: {
+                select: {
+                  serviceZone: {
+                    select: { id: true, name: true }
+                  }
+                }
+              }
+            }
           }
         }
       });
@@ -572,18 +671,27 @@ export class TargetController {
             undefined // Overall performance (no product filter)
           );
 
+          const totalOffers = await TargetController.getUserTotalOffers(
+            user.id,
+            actualPeriod,
+            actualPeriodType,
+            undefined // Overall performance (no product filter)
+          );
+
           // If user has targets, sum them up
           if (userTargets.length > 0) {
             const totalTargetValue = userTargets.reduce((sum: number, t: any) => sum + Number(t.targetValue), 0);
+            const isMonthlyView = actualValuePeriod && String(actualValuePeriod).includes('-');
             return {
               id: userTargets[0].id, // Use first target's ID
               userId: user.id,
-              targetPeriod: targetPeriod as string,
-              periodType: periodType as string,
+              targetPeriod: isMonthlyView ? (actualValuePeriod as string) : (targetPeriod as string),
+              periodType: isMonthlyView ? 'MONTHLY' : (periodType as string),
               user: user,
-              targetValue: totalTargetValue,
+              targetValue: totalTargetValue, // Keep yearly value, will divide in grouped response if needed
               actualValue: actual.value,
               actualOfferCount: actual.count,
+              totalOffers: totalOffers,
               targetOfferCount: userTargets.reduce((sum: number, t: any) => sum + (t.targetOfferCount || 0), 0),
               achievement: totalTargetValue > 0 ? (actual.value / totalTargetValue) * 100 : 0,
               targetCount: userTargets.length
@@ -599,6 +707,7 @@ export class TargetController {
               targetValue: 0,
               actualValue: actual.value,
               actualOfferCount: actual.count,
+              totalOffers: totalOffers,
               targetOfferCount: 0,
               achievement: 0, // No target = 0% achievement
               targetCount: 0
@@ -624,6 +733,7 @@ export class TargetController {
               actualValue: 0,
               targetOfferCount: 0,
               actualOfferCount: 0,
+              totalOffers: 0,
               targetCount: 0
             };
           }
@@ -631,12 +741,54 @@ export class TargetController {
           groupedTargets[key].actualValue += target.actualValue;
           groupedTargets[key].targetOfferCount += (target.targetOfferCount || 0);
           groupedTargets[key].actualOfferCount += target.actualOfferCount;
+          groupedTargets[key].totalOffers += (target.totalOffers || 0);
           groupedTargets[key].targetCount += 1;
         });
 
-        const result = Object.values(groupedTargets).map((t: any) => ({
-          ...t,
-          achievement: t.targetValue > 0 ? (t.actualValue / t.targetValue) * 100 : 0
+        const result = await Promise.all(Object.values(groupedTargets).map(async (t: any) => {
+          const isMonthlyView = t.periodType === 'MONTHLY';
+          const displayTargetValue = isMonthlyView ? Math.round(t.targetValue / 12) : t.targetValue;
+          const variance = t.actualValue - displayTargetValue;
+          const variancePercentage = displayTargetValue > 0 ? (variance / displayTargetValue) * 100 : 0;
+          
+          // Calculate achievement percentage (user-specific only)
+          const achievement = displayTargetValue > 0 ? (t.actualValue / displayTargetValue) * 100 : 0;
+          const expectedAchievement = displayTargetValue > 0 ? (0 / displayTargetValue) * 100 : 0;
+          
+          // Get comprehensive metrics for this user
+          const metrics = await TargetController.getUserMetrics(
+            t.userId,
+            t.targetPeriod,
+            t.periodType
+          );
+          
+          return {
+            id: t.id,
+            userId: t.userId,
+            targetPeriod: t.targetPeriod,
+            periodType: t.periodType,
+            user: t.user,
+            targetValue: displayTargetValue,
+            actualValue: t.actualValue,
+            targetOfferCount: t.targetOfferCount,
+            actualOfferCount: t.actualOfferCount,
+            totalOffers: t.totalOffers,
+            targetCount: t.targetCount,
+            achievement: achievement,
+            expectedAchievement: expectedAchievement,
+            variance: variance,
+            variancePercentage: variancePercentage,
+            // User-specific comprehensive metrics
+            metrics: {
+              noOfOffers: metrics.totalOffers,
+              offersValue: metrics.totalOffersValue,
+              ordersReceived: metrics.ordersReceived,
+              expectedOffers: metrics.expectedOffers,
+              openFunnel: metrics.openFunnel,
+              orderBooking: metrics.orderBooking,
+              balanceBU: displayTargetValue - t.actualValue
+            }
+          };
         }));
 
         return res.json({
@@ -654,17 +806,22 @@ export class TargetController {
           
           // Skip if trying to use yearly period with monthly period type
           if (actualPeriodType === 'MONTHLY' && !actualPeriod.includes('-')) {
+            const isMonthlyView = actualValuePeriod && String(actualValuePeriod).includes('-');
+            const displayTargetValue = isMonthlyView ? Math.round(Number(target.targetValue) / 12) : Number(target.targetValue);
+            const variance = 0 - displayTargetValue;
             return {
               id: target.id,
               userId: target.userId,
               targetPeriod: target.targetPeriod,
               periodType: target.periodType,
               productType: target.productType,
-              targetValue: Number(target.targetValue),
+              targetValue: displayTargetValue,
               targetOfferCount: target.targetOfferCount,
               actualValue: 0,
               actualOfferCount: 0,
               achievement: 0,
+              variance: variance,
+              variancePercentage: displayTargetValue > 0 ? (variance / displayTargetValue) * 100 : 0,
               user: target.user
             };
           }
@@ -676,17 +833,23 @@ export class TargetController {
             target.productType // Include product type filter for individual targets
           );
 
+          // For monthly view, divide target by 12 before calculating variance
+          const isMonthlyView = actualValuePeriod && String(actualValuePeriod).includes('-');
+          const displayTargetValue = isMonthlyView ? Math.round(Number(target.targetValue) / 12) : Number(target.targetValue);
+          const variance = actual.value - displayTargetValue;
           return {
             id: target.id,
             userId: target.userId,
             targetPeriod: target.targetPeriod,
             periodType: target.periodType,
             productType: target.productType,
-            targetValue: Number(target.targetValue),
+            targetValue: displayTargetValue,
             targetOfferCount: target.targetOfferCount,
             actualValue: actual.value,
             actualOfferCount: actual.count,
-            achievement: Number(target.targetValue) > 0 ? (actual.value / Number(target.targetValue)) * 100 : 0,
+            achievement: displayTargetValue > 0 ? (actual.value / displayTargetValue) * 100 : 0,
+            variance: variance,
+            variancePercentage: displayTargetValue > 0 ? (variance / displayTargetValue) * 100 : 0,
             user: target.user
           };
         })
@@ -780,6 +943,394 @@ export class TargetController {
   // ==================== PRODUCT TYPE TARGETS ====================
   
   // ==================== ANALYTICS & DASHBOARD ====================
+
+  /**
+   * Get detailed zone target breakdown by product type
+   */
+  static async getZoneTargetDetails(req: AuthRequest, res: Response) {
+    try {
+      const { zoneId } = req.params;
+      const { targetPeriod, periodType } = req.query;
+
+      if (!zoneId || !targetPeriod || !periodType) {
+        return res.status(400).json({
+          success: false,
+          message: 'Zone ID, target period, and period type are required'
+        });
+      }
+
+      const serviceZoneId = parseInt(zoneId as string);
+
+      // Get zone info
+      const zone = await prisma.serviceZone.findUnique({
+        where: { id: serviceZoneId },
+        select: { id: true, name: true, shortForm: true }
+      });
+
+      if (!zone) {
+        return res.status(404).json({
+          success: false,
+          message: 'Zone not found'
+        });
+      }
+
+      // Enforce access for zone roles: can only access their own zone
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user?.zoneId) {
+        const userZoneId = parseInt(req.user.zoneId.toString());
+        if (serviceZoneId !== userZoneId) {
+          return res.status(403).json({
+            success: false,
+            message: 'Access denied'
+          });
+        }
+      }
+
+      // Get all targets for this zone (including product-specific)
+      const allTargets = await prisma.zoneTarget.findMany({
+        where: {
+          serviceZoneId,
+          targetPeriod: targetPeriod as string,
+          periodType: periodType as 'MONTHLY' | 'YEARLY'
+        }
+      });
+
+      // Get all product types from the system
+      const dateFilter = TargetController.buildDateFilter(targetPeriod as string, periodType as string);
+      
+      // All possible product types from the enum
+      const allPossibleProductTypes = [
+        'RELOCATION',
+        'CONTRACT',
+        'SPP',
+        'UPGRADE_KIT',
+        'SOFTWARE',
+        'BD_CHARGES',
+        'BD_SPARE',
+        'MIDLIFE_UPGRADE',
+        'RETROFIT_KIT'
+      ];
+
+      // Get product types from offers in this zone
+      const offerProductTypes = await prisma.offer.findMany({
+        where: {
+          zoneId: serviceZoneId,
+          stage: { in: ['WON', 'PO_RECEIVED', 'ORDER_BOOKED'] },
+          OR: [
+            { poDate: { gte: dateFilter.gte, lte: dateFilter.lte } },
+            { bookingDateInSap: { gte: dateFilter.gte, lte: dateFilter.lte } },
+            { offerClosedInCrm: { gte: dateFilter.gte, lte: dateFilter.lte } },
+            { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } }
+          ]
+        },
+        select: { productType: true },
+        distinct: ['productType']
+      });
+
+      // Get product types from targets for this zone
+      const targetProductTypes = allTargets
+        .filter(t => t.productType)
+        .map(t => ({ productType: t.productType }));
+
+      // Combine all product types and deduplicate
+      const allProductTypesSet = new Set<string | null>();
+      allPossibleProductTypes.forEach(pt => allProductTypesSet.add(pt));
+      offerProductTypes.forEach(pt => allProductTypesSet.add(pt.productType));
+      targetProductTypes.forEach(pt => allProductTypesSet.add(pt.productType));
+      
+      const allProductTypes = Array.from(allProductTypesSet)
+        .sort((a, b) => {
+          // Sort with 'Overall' first, then alphabetically
+          if (a === null) return -1;
+          if (b === null) return 1;
+          return (a || '').localeCompare(b || '');
+        })
+        .map(pt => ({ productType: pt }));
+
+      // Build target details for each product type
+      const targetDetails = await Promise.all(
+        allProductTypes.map(async (pt) => {
+          const productType = pt.productType || undefined;
+          const target = allTargets.find(t => t.productType === productType);
+          const actual = await TargetController.getZoneActualPerformance(
+            serviceZoneId,
+            targetPeriod as string,
+            periodType as string,
+            productType
+          );
+
+          const targetValue = target ? Number(target.targetValue) : 0;
+          const isMonthlyView = (periodType as string) === 'MONTHLY' || (targetPeriod as string).includes('-');
+          const displayTargetValue = isMonthlyView ? Math.round(targetValue / 12) : targetValue;
+          const variance = actual.value - displayTargetValue;
+
+          return {
+            productType: productType || 'Overall',
+            targetValue: displayTargetValue,
+            actualValue: actual.value,
+            actualOfferCount: actual.count,
+            targetOfferCount: target?.targetOfferCount || 0,
+            achievement: displayTargetValue > 0 ? (actual.value / displayTargetValue) * 100 : 0,
+            variance: variance,
+            variancePercentage: displayTargetValue > 0 ? (variance / displayTargetValue) * 100 : 0
+          };
+        })
+      );
+
+      // Also include overall target if exists
+      const overallTarget = allTargets.find(t => !t.productType);
+      if (overallTarget && !targetDetails.some(t => t.productType === 'Overall')) {
+        const actual = await TargetController.getZoneActualPerformance(
+          serviceZoneId,
+          targetPeriod as string,
+          periodType as string,
+          undefined
+        );
+
+        const targetValue = Number(overallTarget.targetValue);
+        const isMonthlyView = (periodType as string) === 'MONTHLY' || (targetPeriod as string).includes('-');
+        const displayTargetValue = isMonthlyView ? Math.round(targetValue / 12) : targetValue;
+        const variance = actual.value - displayTargetValue;
+
+        targetDetails.unshift({
+          productType: 'Overall',
+          targetValue: displayTargetValue,
+          actualValue: actual.value,
+          actualOfferCount: actual.count,
+          targetOfferCount: overallTarget.targetOfferCount || 0,
+          achievement: displayTargetValue > 0 ? (actual.value / displayTargetValue) * 100 : 0,
+          variance: variance,
+          variancePercentage: displayTargetValue > 0 ? (variance / displayTargetValue) * 100 : 0
+        });
+      }
+
+      // Calculate summary
+      const summary = {
+        totalTargets: targetDetails.length,
+        totalTargetValue: targetDetails.reduce((sum, t) => sum + t.targetValue, 0),
+        totalActualValue: targetDetails.reduce((sum, t) => sum + t.actualValue, 0),
+        totalAchievement: 0
+      };
+      summary.totalAchievement = summary.totalTargetValue > 0 
+        ? (summary.totalActualValue / summary.totalTargetValue) * 100 
+        : 0;
+
+      return res.json({
+        success: true,
+        data: {
+          zone,
+          targets: targetDetails,
+          summary,
+          period: { targetPeriod, periodType }
+        }
+      });
+    } catch (error) {
+      logger.error('Get zone target details error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch zone target details'
+      });
+    }
+  }
+
+  /**
+   * Get detailed user target breakdown by product type
+   */
+  static async getUserTargetDetails(req: AuthRequest, res: Response) {
+    try {
+      const { userId } = req.params;
+      const { targetPeriod, periodType } = req.query;
+
+      if (!userId || !targetPeriod || !periodType) {
+        return res.status(400).json({
+          success: false,
+          message: 'User ID, target period, and period type are required'
+        });
+      }
+
+      const uid = parseInt(userId as string);
+
+      // Get user info
+      const user = await prisma.user.findUnique({
+        where: { id: uid },
+        select: { 
+          id: true, 
+          name: true, 
+          email: true,
+          serviceZones: {
+            select: {
+              serviceZone: {
+                select: { id: true, name: true }
+              }
+            }
+          }
+        }
+      });
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+
+      // Enforce access for zone roles: can only access users within their zone
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user?.zoneId) {
+        const userZoneId = parseInt(req.user.zoneId.toString());
+        const belongsToZone = user.serviceZones?.some(sz => sz.serviceZone?.id === userZoneId);
+        if (!belongsToZone) {
+          return res.status(403).json({
+            success: false,
+            message: 'Access denied'
+          });
+        }
+      }
+
+      // Get all targets for this user (including product-specific)
+      const allTargets = await prisma.userTarget.findMany({
+        where: {
+          userId: uid,
+          targetPeriod: targetPeriod as string,
+          periodType: periodType as 'MONTHLY' | 'YEARLY'
+        }
+      });
+
+      // Get all product types from the system
+      const dateFilter = TargetController.buildDateFilter(targetPeriod as string, periodType as string);
+      
+      // All possible product types from the enum
+      const allPossibleProductTypes = [
+        'RELOCATION',
+        'CONTRACT',
+        'SPP',
+        'UPGRADE_KIT',
+        'SOFTWARE',
+        'BD_CHARGES',
+        'BD_SPARE',
+        'MIDLIFE_UPGRADE',
+        'RETROFIT_KIT'
+      ];
+
+      // Get product types from offers created by this user
+      const offerProductTypes = await prisma.offer.findMany({
+        where: {
+          createdById: uid,
+          stage: { in: ['WON', 'PO_RECEIVED', 'ORDER_BOOKED'] },
+          OR: [
+            { poDate: { gte: dateFilter.gte, lte: dateFilter.lte } },
+            { bookingDateInSap: { gte: dateFilter.gte, lte: dateFilter.lte } },
+            { offerClosedInCrm: { gte: dateFilter.gte, lte: dateFilter.lte } },
+            { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } }
+          ]
+        },
+        select: { productType: true },
+        distinct: ['productType']
+      });
+
+      // Get product types from targets for this user
+      const targetProductTypes = allTargets
+        .filter(t => t.productType)
+        .map(t => ({ productType: t.productType }));
+
+      // Combine all product types and deduplicate
+      const allProductTypesSet = new Set<string | null>();
+      allPossibleProductTypes.forEach(pt => allProductTypesSet.add(pt));
+      offerProductTypes.forEach(pt => allProductTypesSet.add(pt.productType));
+      targetProductTypes.forEach(pt => allProductTypesSet.add(pt.productType));
+      
+      const allProductTypes = Array.from(allProductTypesSet)
+        .sort((a, b) => {
+          // Sort with 'Overall' first, then alphabetically
+          if (a === null) return -1;
+          if (b === null) return 1;
+          return (a || '').localeCompare(b || '');
+        })
+        .map(pt => ({ productType: pt }));
+
+      // Build target details for each product type
+      const targetDetails = await Promise.all(
+        allProductTypes.map(async (pt) => {
+          const productType = pt.productType || undefined;
+          const target = allTargets.find(t => t.productType === productType);
+          const actual = await TargetController.getUserActualPerformance(
+            uid,
+            targetPeriod as string,
+            periodType as string,
+            productType
+          );
+
+          const targetValue = target ? Number(target.targetValue) : 0;
+          const isMonthlyView = (periodType as string) === 'MONTHLY' || (targetPeriod as string).includes('-');
+          const displayTargetValue = isMonthlyView ? Math.round(targetValue / 12) : targetValue;
+          const variance = actual.value - displayTargetValue;
+
+          return {
+            productType: productType || 'Overall',
+            targetValue: displayTargetValue,
+            actualValue: actual.value,
+            actualOfferCount: actual.count,
+            targetOfferCount: target?.targetOfferCount || 0,
+            achievement: displayTargetValue > 0 ? (actual.value / displayTargetValue) * 100 : 0,
+            variance: variance,
+            variancePercentage: displayTargetValue > 0 ? (variance / displayTargetValue) * 100 : 0
+          };
+        })
+      );
+
+      // Also include overall target if exists
+      const overallTarget = allTargets.find(t => !t.productType);
+      if (overallTarget && !targetDetails.some(t => t.productType === 'Overall')) {
+        const actual = await TargetController.getUserActualPerformance(
+          uid,
+          targetPeriod as string,
+          periodType as string,
+          undefined
+        );
+
+        const targetValue = Number(overallTarget.targetValue);
+        const isMonthlyView = (periodType as string) === 'MONTHLY' || (targetPeriod as string).includes('-');
+        const displayTargetValue = isMonthlyView ? Math.round(targetValue / 12) : targetValue;
+        const variance = actual.value - displayTargetValue;
+
+        targetDetails.unshift({
+          productType: 'Overall',
+          targetValue: displayTargetValue,
+          actualValue: actual.value,
+          actualOfferCount: actual.count,
+          targetOfferCount: overallTarget.targetOfferCount || 0,
+          achievement: displayTargetValue > 0 ? (actual.value / displayTargetValue) * 100 : 0,
+          variance: variance,
+          variancePercentage: displayTargetValue > 0 ? (variance / displayTargetValue) * 100 : 0
+        });
+      }
+
+      // Calculate summary
+      const summary = {
+        totalTargets: targetDetails.length,
+        totalTargetValue: targetDetails.reduce((sum, t) => sum + t.targetValue, 0),
+        totalActualValue: targetDetails.reduce((sum, t) => sum + t.actualValue, 0),
+        totalAchievement: 0
+      };
+      summary.totalAchievement = summary.totalTargetValue > 0 
+        ? (summary.totalActualValue / summary.totalTargetValue) * 100 
+        : 0;
+
+      return res.json({
+        success: true,
+        data: {
+          user,
+          targets: targetDetails,
+          summary,
+          period: { targetPeriod, periodType }
+        }
+      });
+    } catch (error) {
+      logger.error('Get user target details error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch user target details'
+      });
+    }
+  }
 
   /**
    * Get comprehensive target dashboard
@@ -885,9 +1436,40 @@ export class TargetController {
   // ==================== HELPER METHODS ====================
 
   /**
+   * Get total offers count for a zone
+   */
+  static async getZoneTotalOffers(
+    serviceZoneId: number,
+    targetPeriod: string,
+    periodType: string,
+    productType?: string
+  ): Promise<number> {
+    try {
+      const dateFilter = TargetController.buildDateFilter(targetPeriod, periodType);
+      const startDate: Date = dateFilter.gte;
+      const endDate: Date = dateFilter.lte;
+
+      const whereClause: any = {
+        zoneId: serviceZoneId,
+        createdAt: { gte: startDate, lte: endDate },
+        ...(productType ? { productType } : {}),
+      };
+
+      const count = await prisma.offer.count({
+        where: whereClause,
+      });
+
+      return count;
+    } catch (error) {
+      logger.error('Get zone total offers error:', error);
+      return 0;
+    }
+  }
+
+  /**
    * Get actual performance for a zone
    */
-  private static async getZoneActualPerformance(
+  static async getZoneActualPerformance(
     serviceZoneId: number,
     targetPeriod: string,
     periodType: string,
@@ -895,47 +1477,73 @@ export class TargetController {
   ): Promise<{ value: number; count: number }> {
     try {
       const dateFilter = TargetController.buildDateFilter(targetPeriod, periodType);
+      const startDate: Date = dateFilter.gte;
+      const endDate: Date = dateFilter.lte;
 
-    // Build base where clause
-    const whereClause: any = {
-      zoneId: serviceZoneId,
-      createdAt: dateFilter // Use createdAt as the primary date filter
-    };
+      // Build where clause using correct period fields
+      const whereClause: any = {
+        zoneId: serviceZoneId,
+        stage: { in: ['WON', 'PO_RECEIVED', 'ORDER_BOOKED'] },
+        ...(productType ? { productType } : {}),
+        OR: [
+          // PO-based stages: use poDate
+          {
+            AND: [
+              { stage: { in: ['PO_RECEIVED', 'ORDER_BOOKED'] } },
+              { poDate: { gte: startDate, lte: endDate } },
+            ],
+          },
+          // ORDER_BOOKED: prefer bookingDateInSap when available
+          {
+            AND: [
+              { stage: 'ORDER_BOOKED' },
+              { bookingDateInSap: { gte: startDate, lte: endDate } },
+            ],
+          },
+          // WON stage: use offerClosedInCrm
+          {
+            AND: [
+              { stage: 'WON' },
+              { offerClosedInCrm: { gte: startDate, lte: endDate } },
+            ],
+          },
+          // Fallback: if above dates missing, use createdAt
+          {
+            AND: [
+              { OR: [
+                { poDate: null },
+                { offerClosedInCrm: null },
+                { bookingDateInSap: null },
+              ] },
+              { createdAt: { gte: startDate, lte: endDate } },
+            ],
+          },
+        ],
+      };
 
-    // Add product type filter if specified
-    if (productType) {
-      whereClause.productType = productType;
-    }
-
-    // Get all offers for the period and zone
-    const offers = await prisma.offer.findMany({
-      where: whereClause,
-      select: {
-        id: true,
-        stage: true,
-        poValue: true,
-        offerValue: true,
-        createdAt: true,
-        offerClosedInCrm: true,
-        poDate: true
-      }
-    });
+      const offers = await prisma.offer.findMany({
+        where: whereClause,
+        select: {
+          id: true,
+          stage: true,
+          poValue: true,
+          offerValue: true,
+          createdAt: true,
+          offerClosedInCrm: true,
+          poDate: true,
+          bookingDateInSap: true,
+        },
+      });
 
     // Filter and calculate actual performance
     let totalValue = 0;
     let count = 0;
 
     for (const offer of offers) {
-      // Only count offers that are in successful stages
-      if (['WON', 'PO_RECEIVED', 'ORDER_BOOKED'].includes(offer.stage)) {
-        // Use poValue if available, otherwise use offerValue (but not both)
-        const value = offer.poValue ? Number(offer.poValue) : 
-                     (offer.offerValue ? Number(offer.offerValue) : 0);
-        
-        if (value > 0) {
-          totalValue += value;
-          count++;
-        }
+      const value = offer.poValue ? Number(offer.poValue) : (offer.offerValue ? Number(offer.offerValue) : 0);
+      if (value > 0) {
+        totalValue += value;
+        count++;
       }
     }
 
@@ -950,9 +1558,40 @@ export class TargetController {
   }
 
   /**
+   * Get total offers count for a user
+   */
+  static async getUserTotalOffers(
+    userId: number,
+    targetPeriod: string,
+    periodType: string,
+    productType?: string
+  ): Promise<number> {
+    try {
+      const dateFilter = TargetController.buildDateFilter(targetPeriod, periodType);
+      const startDate: Date = dateFilter.gte;
+      const endDate: Date = dateFilter.lte;
+
+      const whereClause: any = {
+        createdById: userId,
+        createdAt: { gte: startDate, lte: endDate },
+        ...(productType ? { productType } : {}),
+      };
+
+      const count = await prisma.offer.count({
+        where: whereClause,
+      });
+
+      return count;
+    } catch (error) {
+      logger.error('Get user total offers error:', error);
+      return 0;
+    }
+  }
+
+  /**
    * Get actual performance for a user
    */
-  private static async getUserActualPerformance(
+  static async getUserActualPerformance(
     userId: number,
     targetPeriod: string,
     periodType: string,
@@ -960,31 +1599,58 @@ export class TargetController {
   ): Promise<{ value: number; count: number }> {
     try {
       const dateFilter = TargetController.buildDateFilter(targetPeriod, periodType);
+      const startDate: Date = dateFilter.gte;
+      const endDate: Date = dateFilter.lte;
 
-    // Build base where clause
-    const whereClause: any = {
-      createdById: userId,
-      createdAt: dateFilter // Use createdAt as the primary date filter
-    };
+      const whereClause: any = {
+        createdById: userId,
+        stage: { in: ['WON', 'PO_RECEIVED', 'ORDER_BOOKED'] },
+        ...(productType ? { productType } : {}),
+        OR: [
+          {
+            AND: [
+              { stage: { in: ['PO_RECEIVED', 'ORDER_BOOKED'] } },
+              { poDate: { gte: startDate, lte: endDate } },
+            ],
+          },
+          {
+            AND: [
+              { stage: 'ORDER_BOOKED' },
+              { bookingDateInSap: { gte: startDate, lte: endDate } },
+            ],
+          },
+          {
+            AND: [
+              { stage: 'WON' },
+              { offerClosedInCrm: { gte: startDate, lte: endDate } },
+            ],
+          },
+          {
+            AND: [
+              { OR: [
+                { poDate: null },
+                { offerClosedInCrm: null },
+                { bookingDateInSap: null },
+              ] },
+              { createdAt: { gte: startDate, lte: endDate } },
+            ],
+          },
+        ],
+      };
 
-    // Add product type filter if specified
-    if (productType) {
-      whereClause.productType = productType;
-    }
-
-    // Get all offers for the period and user
-    const offers = await prisma.offer.findMany({
-      where: whereClause,
-      select: {
-        id: true,
-        stage: true,
-        poValue: true,
-        offerValue: true,
-        createdAt: true,
-        offerClosedInCrm: true,
-        poDate: true
-      }
-    });
+      const offers = await prisma.offer.findMany({
+        where: whereClause,
+        select: {
+          id: true,
+          stage: true,
+          poValue: true,
+          offerValue: true,
+          createdAt: true,
+          offerClosedInCrm: true,
+          poDate: true,
+          bookingDateInSap: true
+        }
+      });
 
     // Filter and calculate actual performance
     let totalValue = 0;
@@ -1017,7 +1683,7 @@ export class TargetController {
   /**
    * Build date filter based on period type
    */
-  private static buildDateFilter(targetPeriod: string, periodType: string): any {
+  static buildDateFilter(targetPeriod: string, periodType: string): any {
     if (periodType === 'MONTHLY') {
       // Format: "YYYY-MM"
       if (!targetPeriod || !targetPeriod.includes('-')) {
@@ -1074,6 +1740,576 @@ export class TargetController {
         gte: startDate,
         lte: endDate
       };
+    }
+  }
+
+  /**
+   * Get comprehensive zone metrics for target report
+   */
+  static async getZoneMetrics(
+    serviceZoneId: number,
+    targetPeriod: string,
+    periodType: string
+  ): Promise<any> {
+    try {
+      const dateFilter = TargetController.buildDateFilter(targetPeriod, periodType);
+      const startDate: Date = dateFilter.gte;
+      const endDate: Date = dateFilter.lte;
+
+
+      // Get all offers for this zone in the period
+      // For expectedOffers, we need offers from ANY time that have poExpectedMonth matching the period
+      const offers = await prisma.offer.findMany({
+        where: {
+          zoneId: serviceZoneId,
+          createdAt: { gte: startDate, lte: endDate }
+        },
+        select: {
+          id: true,
+          stage: true,
+          offerValue: true,
+          poValue: true,
+          bookingDateInSap: true,
+          probabilityPercentage: true,
+          poExpectedMonth: true
+        }
+      });
+
+      // Get offers with expected PO month matching the period (for expectedOffers calculation)
+      // For YEARLY: match all months in the year (e.g., "2025-01" to "2025-12" for period "2025")
+      // For MONTHLY: match exact month (e.g., "2025-11" for period "2025-11")
+      let expectedMonthFilter: any;
+      
+      if (periodType === 'YEARLY') {
+        // For yearly, match all months starting with the year (e.g., "2025-")
+        expectedMonthFilter = {
+          poExpectedMonth: {
+            startsWith: targetPeriod + '-'
+          }
+        };
+      } else {
+        // For monthly, match exact month
+        expectedMonthFilter = {
+          poExpectedMonth: targetPeriod
+        };
+      }
+
+      const offersWithExpectedMonth = await prisma.offer.findMany({
+        where: {
+          zoneId: serviceZoneId,
+          ...expectedMonthFilter
+        },
+        select: {
+          id: true,
+          offerValue: true,
+          probabilityPercentage: true,
+          poExpectedMonth: true
+        }
+      });
+
+
+      // Calculate metrics
+      const totalOffers = offers.length;
+      const totalOffersValue = offers.reduce((sum, o) => sum + (Number(o.offerValue) || 0), 0);
+      
+      // Orders Received = WON stage offers (count)
+      const ordersReceived = offers.filter(o => o.stage === 'WON').length;
+      
+      // Orders Received Value = Sum of WON stage offer values
+      const ordersReceivedValue = offers
+        .filter(o => o.stage === 'WON')
+        .reduce((sum, o) => sum + (Number(o.offerValue) || 0), 0);
+      
+      // Open Funnel = Offers Value – Orders Received Value (CORRECT FORMULA)
+      const openFunnel = totalOffersValue - ordersReceivedValue;
+      
+      // Expected Offers = Sum of (Offer Value × Probability / 100) WHERE Probability > 50% AND poExpectedMonth matches period
+      const offersWithHighProbability = offersWithExpectedMonth.filter(o => (o.probabilityPercentage || 0) > 50);
+      const expectedOffers = offersWithHighProbability
+        .reduce((sum, o) => sum + (Number(o.offerValue) || 0) * ((Number(o.probabilityPercentage) || 0) / 100), 0);
+      
+      // YTD (Year-to-Date) - orders booked in current year
+      const currentYear = new Date().getFullYear();
+      const ytdStart = new Date(currentYear, 0, 1);
+      const ytdEnd = new Date(currentYear, 11, 31, 23, 59, 59);
+      const orderBookingYTD = offers.filter(o => 
+        o.stage === 'ORDER_BOOKED' && 
+        o.bookingDateInSap && 
+        new Date(o.bookingDateInSap) >= ytdStart && 
+        new Date(o.bookingDateInSap) <= ytdEnd
+      ).length;
+
+      return {
+        totalOffers,
+        totalOffersValue: Number(totalOffersValue),
+        ordersReceived: Number(ordersReceivedValue),
+        openFunnel: Number(openFunnel),
+        expectedOffers: Number(expectedOffers),
+        orderBooking: orderBookingYTD,
+        periodType,
+        targetPeriod
+      };
+    } catch (error) {
+      logger.error('Get zone metrics error:', error);
+      return {
+        totalOffers: 0,
+        totalOffersValue: 0,
+        ordersReceived: 0,
+        openFunnel: 0,
+        expectedOffers: 0,
+        orderBooking: 0
+      };
+    }
+  }
+
+  /**
+   * Get comprehensive user metrics for target report
+   */
+  static async getUserMetrics(
+    userId: number,
+    targetPeriod: string,
+    periodType: string
+  ): Promise<any> {
+    try {
+      const dateFilter = TargetController.buildDateFilter(targetPeriod, periodType);
+      const startDate: Date = dateFilter.gte;
+      const endDate: Date = dateFilter.lte;
+
+      // Get all offers created by this user in the period
+      const offers = await prisma.offer.findMany({
+        where: {
+          createdById: userId,
+          createdAt: { gte: startDate, lte: endDate }
+        },
+        select: {
+          id: true,
+          stage: true,
+          offerValue: true,
+          poValue: true,
+          bookingDateInSap: true,
+          probabilityPercentage: true,
+          poExpectedMonth: true
+        }
+      });
+
+      // Get offers with expected PO month matching the period (for expectedOffers calculation)
+      let expectedMonthFilter: any;
+      
+      if (periodType === 'YEARLY') {
+        // For yearly, match all months starting with the year (e.g., "2025-")
+        expectedMonthFilter = {
+          poExpectedMonth: {
+            startsWith: targetPeriod + '-'
+          }
+        };
+      } else {
+        // For monthly, match exact month
+        expectedMonthFilter = {
+          poExpectedMonth: targetPeriod
+        };
+      }
+
+      const offersWithExpectedMonth = await prisma.offer.findMany({
+        where: {
+          createdById: userId,
+          ...expectedMonthFilter
+        },
+        select: {
+          id: true,
+          offerValue: true,
+          probabilityPercentage: true,
+          poExpectedMonth: true
+        }
+      });
+
+      // Calculate metrics
+      const totalOffers = offers.length;
+      const totalOffersValue = offers.reduce((sum, o) => sum + (Number(o.offerValue) || 0), 0);
+      
+      // Orders Received = WON stage offers (count)
+      const ordersReceived = offers.filter(o => o.stage === 'WON').length;
+      
+      // Orders Received Value = Sum of WON stage offer values
+      const ordersReceivedValue = offers
+        .filter(o => o.stage === 'WON')
+        .reduce((sum, o) => sum + (Number(o.offerValue) || 0), 0);
+      
+      // Open Funnel = Offers Value – Orders Received Value
+      const openFunnel = totalOffersValue - ordersReceivedValue;
+      
+      // Expected Offers = Sum of (Offer Value × Probability / 100) WHERE Probability > 50% AND poExpectedMonth matches period
+      const offersWithHighProbability = offersWithExpectedMonth.filter(o => (o.probabilityPercentage || 0) > 50);
+      const expectedOffers = offersWithHighProbability
+        .reduce((sum, o) => sum + (Number(o.offerValue) || 0) * ((Number(o.probabilityPercentage) || 0) / 100), 0);
+      
+      // YTD (Year-to-Date) - orders booked in current year
+      const currentYear = new Date().getFullYear();
+      const ytdStart = new Date(currentYear, 0, 1);
+      const ytdEnd = new Date(currentYear, 11, 31, 23, 59, 59);
+      const orderBookingYTD = offers.filter(o => 
+        o.stage === 'ORDER_BOOKED' && 
+        o.bookingDateInSap && 
+        new Date(o.bookingDateInSap) >= ytdStart && 
+        new Date(o.bookingDateInSap) <= ytdEnd
+      ).length;
+
+      return {
+        totalOffers,
+        totalOffersValue: Number(totalOffersValue),
+        ordersReceived: Number(ordersReceivedValue),
+        openFunnel: Number(openFunnel),
+        expectedOffers: Number(expectedOffers),
+        orderBooking: orderBookingYTD,
+        periodType,
+        targetPeriod
+      };
+    } catch (error) {
+      logger.error('Get user metrics error:', error);
+      return {
+        totalOffers: 0,
+        totalOffersValue: 0,
+        ordersReceived: 0,
+        openFunnel: 0,
+        expectedOffers: 0,
+        orderBooking: 0
+      };
+    }
+  }
+
+  /**
+   * Get dashboard targets summary - shows total and monthly targets with actual performance
+   * Used by admin dashboard to display target overview
+   */
+  static async getTargetsSummary(req: AuthRequest, res: Response) {
+    try {
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+      const currentMonthPeriod = `${currentYear}-${currentMonth}`;
+      const currentYearPeriod = String(currentYear);
+
+      // Get all active zones
+      const allZones = await prisma.serviceZone.findMany({
+        where: { isActive: true },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' }
+      });
+
+      // ==================== MONTHLY TARGETS ====================
+      const monthlyTargets = await prisma.zoneTarget.findMany({
+        where: {
+          targetPeriod: currentMonthPeriod,
+          periodType: 'MONTHLY'
+        },
+        include: {
+          serviceZone: { select: { id: true, name: true } }
+        }
+      });
+
+      // Also fetch yearly targets as fallback for monthly view
+      const yearlyTargetsForMonthly = await prisma.zoneTarget.findMany({
+        where: {
+          targetPeriod: currentYearPeriod,
+          periodType: 'YEARLY'
+        },
+        include: {
+          serviceZone: { select: { id: true, name: true } }
+        }
+      });
+
+      // Calculate monthly actual performance for each zone
+      const monthlyByZone = await Promise.all(
+        allZones.map(async (zone) => {
+          // First try monthly targets, then fall back to yearly/12
+          const monthlyZoneTargets = monthlyTargets.filter(t => t.serviceZoneId === zone.id);
+          let totalTarget = monthlyZoneTargets.reduce((sum, t) => sum + Number(t.targetValue), 0);
+          
+          // If no monthly targets, use yearly targets divided by 12
+          if (totalTarget === 0) {
+            const yearlyZoneTargets = yearlyTargetsForMonthly.filter(t => t.serviceZoneId === zone.id);
+            totalTarget = yearlyZoneTargets.reduce((sum, t) => sum + Math.round(Number(t.targetValue) / 12), 0);
+          }
+          
+          const actual = await TargetController.getZoneActualPerformance(
+            zone.id,
+            currentMonthPeriod,
+            'MONTHLY'
+          );
+
+          return {
+            zoneId: zone.id,
+            zoneName: zone.name,
+            monthlyTarget: totalTarget,
+            monthlyActual: actual.value,
+            monthlyOfferCount: actual.count,
+            monthlyAchievement: totalTarget > 0 ? (actual.value / totalTarget) * 100 : 0
+          };
+        })
+      );
+
+      const monthlyTotalTarget = monthlyByZone.reduce((sum, z) => sum + z.monthlyTarget, 0);
+      const monthlyTotalActual = monthlyByZone.reduce((sum, z) => sum + z.monthlyActual, 0);
+      const monthlyTotalOffers = monthlyByZone.reduce((sum, z) => sum + z.monthlyOfferCount, 0);
+
+      // ==================== YEARLY TARGETS ====================
+      const yearlyTargets = await prisma.zoneTarget.findMany({
+        where: {
+          targetPeriod: currentYearPeriod,
+          periodType: 'YEARLY'
+        },
+        include: {
+          serviceZone: { select: { id: true, name: true } }
+        }
+      });
+
+      // Calculate yearly actual performance for each zone
+      const yearlyByZone = await Promise.all(
+        allZones.map(async (zone) => {
+          const zoneTargets = yearlyTargets.filter(t => t.serviceZoneId === zone.id);
+          const totalTarget = zoneTargets.reduce((sum, t) => sum + Number(t.targetValue), 0);
+          
+          const actual = await TargetController.getZoneActualPerformance(
+            zone.id,
+            currentYearPeriod,
+            'YEARLY'
+          );
+
+          return {
+            zoneId: zone.id,
+            zoneName: zone.name,
+            yearlyTarget: totalTarget,
+            yearlyActual: actual.value,
+            yearlyOfferCount: actual.count,
+            yearlyAchievement: totalTarget > 0 ? (actual.value / totalTarget) * 100 : 0
+          };
+        })
+      );
+
+      const yearlyTotalTarget = yearlyByZone.reduce((sum, z) => sum + z.yearlyTarget, 0);
+      const yearlyTotalActual = yearlyByZone.reduce((sum, z) => sum + z.yearlyActual, 0);
+      const yearlyTotalOffers = yearlyByZone.reduce((sum, z) => sum + z.yearlyOfferCount, 0);
+
+      // ==================== PRODUCT TYPE BREAKDOWN ====================
+      // Get all product types from monthly targets
+      const monthlyProductTypes = await prisma.zoneTarget.findMany({
+        where: {
+          targetPeriod: currentMonthPeriod,
+          periodType: 'MONTHLY',
+          productType: { not: null }
+        },
+        select: { productType: true },
+        distinct: ['productType']
+      });
+
+      const allProductTypes = [
+        'RELOCATION',
+        'CONTRACT',
+        'SPP',
+        'UPGRADE_KIT',
+        'SOFTWARE',
+        'BD_CHARGES',
+        'BD_SPARE',
+        'MIDLIFE_UPGRADE',
+        'RETROFIT_KIT'
+      ];
+
+      const byProductType = await Promise.all(
+        allProductTypes.map(async (productType) => {
+          // Monthly - with fallback to yearly/12
+          const monthlyTargetsForPT = monthlyTargets.filter(t => t.productType === productType);
+          let monthlyTargetValue = monthlyTargetsForPT.reduce((sum, t) => sum + Number(t.targetValue), 0);
+          
+          // If no monthly targets, use yearly targets divided by 12
+          if (monthlyTargetValue === 0) {
+            const yearlyTargetsForPTFallback = yearlyTargets.filter(t => t.productType === productType);
+            monthlyTargetValue = yearlyTargetsForPTFallback.reduce((sum, t) => sum + Math.round(Number(t.targetValue) / 12), 0);
+          }
+          
+          const monthlyActualPT = await Promise.all(
+            allZones.map(zone => 
+              TargetController.getZoneActualPerformance(zone.id, currentMonthPeriod, 'MONTHLY', productType)
+            )
+          );
+          const monthlyActualValue = monthlyActualPT.reduce((sum, a) => sum + a.value, 0);
+          const monthlyOfferCountPT = monthlyActualPT.reduce((sum, a) => sum + a.count, 0);
+
+          // Yearly
+          const yearlyTargetsForPT = yearlyTargets.filter(t => t.productType === productType);
+          const yearlyTargetValue = yearlyTargetsForPT.reduce((sum, t) => sum + Number(t.targetValue), 0);
+          
+          const yearlyActualPT = await Promise.all(
+            allZones.map(zone => 
+              TargetController.getZoneActualPerformance(zone.id, currentYearPeriod, 'YEARLY', productType)
+            )
+          );
+          const yearlyActualValue = yearlyActualPT.reduce((sum, a) => sum + a.value, 0);
+          const yearlyOfferCountPT = yearlyActualPT.reduce((sum, a) => sum + a.count, 0);
+
+          return {
+            productType,
+            monthlyTarget: monthlyTargetValue,
+            monthlyActual: monthlyActualValue,
+            monthlyOfferCount: monthlyOfferCountPT,
+            monthlyAchievement: monthlyTargetValue > 0 ? (monthlyActualValue / monthlyTargetValue) * 100 : 0,
+            yearlyTarget: yearlyTargetValue,
+            yearlyActual: yearlyActualValue,
+            yearlyOfferCount: yearlyOfferCountPT,
+            yearlyAchievement: yearlyTargetValue > 0 ? (yearlyActualValue / yearlyTargetValue) * 100 : 0
+          };
+        })
+      );
+
+      // Merge zone data (monthly + yearly)
+      const zoneData = allZones.map(zone => {
+        const monthly = monthlyByZone.find(z => z.zoneId === zone.id) || {
+          zoneId: zone.id,
+          zoneName: zone.name,
+          monthlyTarget: 0,
+          monthlyActual: 0,
+          monthlyOfferCount: 0,
+          monthlyAchievement: 0
+        };
+        const yearly = yearlyByZone.find(z => z.zoneId === zone.id) || {
+          zoneId: zone.id,
+          zoneName: zone.name,
+          yearlyTarget: 0,
+          yearlyActual: 0,
+          yearlyOfferCount: 0,
+          yearlyAchievement: 0
+        };
+
+        return {
+          zoneId: zone.id,
+          zoneName: zone.name,
+          monthlyTarget: monthly.monthlyTarget,
+          monthlyActual: monthly.monthlyActual,
+          monthlyOfferCount: monthly.monthlyOfferCount,
+          monthlyAchievement: monthly.monthlyAchievement,
+          yearlyTarget: yearly.yearlyTarget,
+          yearlyActual: yearly.yearlyActual,
+          yearlyOfferCount: yearly.yearlyOfferCount,
+          yearlyAchievement: yearly.yearlyAchievement
+        };
+      });
+
+      // ==================== USER TARGETS BY ZONE ====================
+      // Fetch all active users with their zone assignments
+      const allUsers = await prisma.user.findMany({
+        where: { isActive: true },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          serviceZones: {
+            select: {
+              serviceZone: { select: { id: true, name: true } }
+            }
+          }
+        },
+        orderBy: { name: 'asc' }
+      });
+
+      // Fetch monthly user targets
+      const monthlyUserTargets = await prisma.userTarget.findMany({
+        where: {
+          targetPeriod: currentMonthPeriod,
+          periodType: 'MONTHLY'
+        }
+      });
+
+      // Fetch yearly user targets
+      const yearlyUserTargets = await prisma.userTarget.findMany({
+        where: {
+          targetPeriod: currentYearPeriod,
+          periodType: 'YEARLY'
+        }
+      });
+
+      // Build user targets by zone
+      const usersByZone = allZones.map(zone => {
+        const zoneUsers = allUsers.filter(user =>
+          user.serviceZones?.some(sz => sz.serviceZone?.id === zone.id)
+        );
+
+        const userTargets = zoneUsers.map(async (user) => {
+          // Monthly targets
+          const monthlyUserTargetsForUser = monthlyUserTargets.filter(t => t.userId === user.id);
+          let monthlyTarget = monthlyUserTargetsForUser.reduce((sum, t) => sum + Number(t.targetValue), 0);
+
+          // Fallback to yearly/12 if no monthly targets
+          if (monthlyTarget === 0) {
+            const yearlyUserTargetsForUser = yearlyUserTargets.filter(t => t.userId === user.id);
+            monthlyTarget = yearlyUserTargetsForUser.reduce((sum, t) => sum + Math.round(Number(t.targetValue) / 12), 0);
+          }
+
+          const monthlyActual = await TargetController.getUserActualPerformance(
+            user.id,
+            currentMonthPeriod,
+            'MONTHLY'
+          );
+
+          // Yearly targets
+          const yearlyUserTargetsForUser = yearlyUserTargets.filter(t => t.userId === user.id);
+          const yearlyTarget = yearlyUserTargetsForUser.reduce((sum, t) => sum + Number(t.targetValue), 0);
+
+          const yearlyActual = await TargetController.getUserActualPerformance(
+            user.id,
+            currentYearPeriod,
+            'YEARLY'
+          );
+
+          return {
+            userId: user.id,
+            userName: user.name,
+            userEmail: user.email,
+            monthlyTarget,
+            monthlyActual: monthlyActual.value,
+            monthlyOfferCount: monthlyActual.count,
+            monthlyAchievement: monthlyTarget > 0 ? (monthlyActual.value / monthlyTarget) * 100 : 0,
+            yearlyTarget,
+            yearlyActual: yearlyActual.value,
+            yearlyOfferCount: yearlyActual.count,
+            yearlyAchievement: yearlyTarget > 0 ? (yearlyActual.value / yearlyTarget) * 100 : 0
+          };
+        });
+
+        return Promise.all(userTargets).then(targets => ({
+          zoneId: zone.id,
+          zoneName: zone.name,
+          users: targets
+        }));
+      });
+
+      const userTargetsByZone = await Promise.all(usersByZone);
+
+      return res.json({
+        success: true,
+        data: {
+          currentMonth: {
+            period: currentMonthPeriod,
+            totalTargetValue: monthlyTotalTarget,
+            totalActualValue: monthlyTotalActual,
+            totalOfferCount: monthlyTotalOffers,
+            achievement: monthlyTotalTarget > 0 ? (monthlyTotalActual / monthlyTotalTarget) * 100 : 0
+          },
+          currentYear: {
+            period: currentYearPeriod,
+            totalTargetValue: yearlyTotalTarget,
+            totalActualValue: yearlyTotalActual,
+            totalOfferCount: yearlyTotalOffers,
+            achievement: yearlyTotalTarget > 0 ? (yearlyTotalActual / yearlyTotalTarget) * 100 : 0
+          },
+          byZone: zoneData,
+          byProductType: byProductType,
+          usersByZone: userTargetsByZone
+        }
+      });
+    } catch (error) {
+      logger.error('Get targets summary error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch targets summary'
+      });
     }
   }
 }

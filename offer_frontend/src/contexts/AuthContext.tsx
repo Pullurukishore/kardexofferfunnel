@@ -12,7 +12,7 @@ import {
 import { usePathname, useRouter } from 'next/navigation';
 import { getCookie, deleteCookie, setCookie } from 'cookies-next';
 import { authService, isTokenExpired } from '@/services/auth.service';
-import { UserRole, User } from '@/types';
+import { UserRole, type User } from '@/types';
 import { isBrowser, safeLocalStorage, safeSessionStorage } from '@/lib/browser';
 
 export type LoginResponse = {
@@ -74,38 +74,55 @@ const getDevToken = (): string | null => {
     return null;
   }
   
+  console.log('DevToken - Token valid, expires in:', Math.round((expiryTime - now) / (1000 * 60 * 60 * 24)), 'days');
   return token;
 };
 
 const manualSetCookie = (name: string, value: string, options: any = {}) => {
   if (typeof document === 'undefined') return;
   
+  // Try multiple cookie setting approaches for maximum compatibility
   const approaches = [
+    // Approach 1: Simple cookie with minimal options
     () => {
       document.cookie = `${name}=${value}; path=/`;
+      console.log('ManualSetCookie - Approach 1 (simple):', `${name}=${value}; path=/`);
     },
+    
+    // Approach 2: Cookie with expiration
     () => {
       const expires = new Date(Date.now() + (options.maxAge || 86400) * 1000);
       document.cookie = `${name}=${value}; path=/; expires=${expires.toUTCString()}`;
+      console.log('ManualSetCookie - Approach 2 (with expires):', `${name}=${value}; path=/; expires=${expires.toUTCString()}`);
     },
+    
+    // Approach 3: Full options (original)
     () => {
       let cookieString = `${name}=${value}`;
       if (options.path) cookieString += `; path=${options.path}`;
       if (options.expires) cookieString += `; expires=${options.expires.toUTCString()}`;
       if (options.maxAge) cookieString += `; max-age=${options.maxAge}`;
+      if (!options.secure) cookieString += ``; // Skip secure in development
       if (options.sameSite) cookieString += `; samesite=${options.sameSite}`;
       document.cookie = cookieString;
+      console.log('ManualSetCookie - Approach 3 (full options):', cookieString);
     }
   ];
   
+  // Try each approach and check if cookies are set
   for (let i = 0; i < approaches.length; i++) {
     try {
       approaches[i]();
+      // Check if cookie was set
       setTimeout(() => {
         if (document.cookie.includes(`${name}=`)) {
+          console.log(`ManualSetCookie - Success with approach ${i + 1}`);
           return;
         } else if (i === approaches.length - 1) {
+          console.error('ManualSetCookie - All approaches failed, cookies not persisting');
+          // Try localStorage as absolute fallback
           localStorage.setItem(`cookie_${name}`, value);
+          console.log(`ManualSetCookie - Stored in localStorage as fallback: cookie_${name}`);
         }
       }, 10);
     } catch (error) {
@@ -135,6 +152,8 @@ function AuthProvider({ children }: { children: ReactNode }) {
     switch (role) {
       case UserRole.ADMIN:
         return '/admin/dashboard';
+      case UserRole.ZONE_MANAGER:
+        return '/zone-manager/dashboard';
       case UserRole.ZONE_USER:
         return '/zone-user/dashboard';
       default:
@@ -152,22 +171,35 @@ function AuthProvider({ children }: { children: ReactNode }) {
                    manualGetCookie('accessToken') || manualGetCookie('token') ||
                    localStorage.getItem('cookie_accessToken') ||
                    getDevToken();
+      console.log('LoadUser - Token found:', !!token);
       
       if (!token) {
+        console.log('LoadUser - No token available');
         return null;
       }
 
+      console.log('LoadUser - Calling getCurrentUser...');
       const userData = await authService.getCurrentUser();
+      console.log('LoadUser - User data received:', userData);
       
       if (!userData || !userData.email) {
+        console.log('LoadUser - Invalid user data received');
         return null;
       }
 
+      // Ensure consistent name handling with better validation
       let userName = userData.name?.trim();
       
+      // Check if name is valid and not a placeholder
       if (!userName || userName === '' || userName === 'null' || userName === 'undefined' || userName === 'User') {
         userName = userData.email?.split('@')[0] || 'User';
       }
+      
+      console.log('LoadUser - User name processing:', {
+        originalName: userData.name,
+        processedName: userName,
+        email: userData.email
+      });
       
       const safeUser: User = {
         ...userData,
@@ -178,20 +210,28 @@ function AuthProvider({ children }: { children: ReactNode }) {
         zoneId: coerceOptionalNumber((userData as any).zoneId),
         customerId: coerceOptionalNumber((userData as any).customerId),
       };
+
+      console.log('LoadUser - Safe user created:', { email: safeUser.email, name: safeUser.name, role: safeUser.role });
       
+      // Update state immediately to prevent race conditions
       setUser(safeUser);
       setAccessToken(token as string);
 
+      // Store user role in cookie for persistence
       setCookie('userRole', safeUser.role, {
         path: '/',
         secure: process.env.NODE_ENV === 'production' ? true : false,
         sameSite: 'lax',
-        maxAge: 60 * 60 * 24 * 7,
+        maxAge: 60 * 60 * 24 * 7, // 7 days
       });
+
+      // Role-based access is now handled by server-side layout and middleware
+      // Removed client-side enforceRoleAccess to prevent render-time redirects
 
       return safeUser;
     } catch (err) {
       console.error('Failed to load user:', err);
+      // Don't clear user state here, let the caller handle it
       throw err;
     }
   }, [pathname]);
@@ -201,6 +241,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
   const lastValidUser = useRef<User | null>(null);
   const isInitializing = useRef(true);
 
+  // Initialize user from cookies on mount to prevent flash
   useEffect(() => {
     const initializeAuth = () => {
       if (!isBrowser) {
@@ -208,6 +249,9 @@ function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       
+      console.log('InitAuth - Starting initialization...');
+      
+      // Try multiple cookie retrieval methods including localStorage fallback
       const token = getCookie('accessToken') || getCookie('token') || 
                    manualGetCookie('accessToken') || manualGetCookie('token') ||
                    localStorage.getItem('cookie_accessToken') ||
@@ -216,15 +260,28 @@ function AuthProvider({ children }: { children: ReactNode }) {
                    localStorage.getItem('cookie_userRole') ||
                    (process.env.NODE_ENV === 'development' ? localStorage.getItem('dev_userRole') : null)) as UserRole | undefined;
       
+      // Debug all cookies
+      if (typeof document !== 'undefined') {
+        console.log('InitAuth - All cookies:', document.cookie);
+      }
+      
+      console.log('InitAuth - Token:', !!token, 'Role:', role);
+      console.log('InitAuth - Token value:', token ? token.substring(0, 20) + '...' : 'null');
+      
+      // If we have both token and role, try to restore user state immediately
       if (token && role) {
+        console.log('InitAuth - Restoring user state from cookies');
+        // Try to get cached user from session storage first
         const cachedUser = safeSessionStorage.getItem('currentUser');
         if (cachedUser) {
           try {
             const parsedUser = JSON.parse(cachedUser);
             if (parsedUser && parsedUser.email && parsedUser.role === role) {
+              console.log('InitAuth - Restored user from session storage:', parsedUser.email, parsedUser.name, parsedUser.role);
               setUser(parsedUser);
               setAccessToken(token as string);
               lastValidUser.current = parsedUser;
+              // Set loading to false immediately since we have cached data
               setIsLoading(false);
               isInitializing.current = false;
               return;
@@ -234,6 +291,9 @@ function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
         
+        // If no cached user but we have token and role, create a minimal user object
+        // This prevents the flash of "User" before the real data loads
+        console.log('InitAuth - No cached user, but have token and role');
         setAccessToken(token as string);
       }
       
@@ -241,30 +301,46 @@ function AuthProvider({ children }: { children: ReactNode }) {
     };
     
     initializeAuth();
-  }, []);
+  }, []); // Run only once on mount
 
   useEffect(() => {
     const checkAuth = async () => {
+      // Wait for initialization to complete
       if (isInitializing.current) {
+        console.log('CheckAuth - Still initializing, waiting...');
         return;
       }
       
+      // Prevent multiple simultaneous auth checks
       if (authCheckInProgress.current) {
+        console.log('CheckAuth - Auth check already in progress, skipping');
+        return;
+      }
+      
+      // Prevent infinite loops on network errors
+      const networkErrorCount = parseInt(sessionStorage.getItem('auth_network_errors') || '0');
+      if (networkErrorCount > 3) {
+        console.log('CheckAuth - Too many network errors, stopping auth checks');
+        setIsLoading(false);
         return;
       }
       
       try {
         authCheckInProgress.current = true;
         
+        // If user is already authenticated and we've done initial check, don't re-check
         if (user && user.email && user.role && initialAuthCheck.current && !pathname.startsWith('/auth/')) {
+          console.log('CheckAuth - User already authenticated:', user.email, user.name, user.role);
           setIsLoading(false);
           return;
         }
         
+        // Don't show loading on auth pages to prevent flicker
         if (!pathname.startsWith('/auth/') && !user) {
           setIsLoading(true);
         }
         
+        // Quick check for basic auth tokens first including localStorage fallback
         const token = getCookie('accessToken') || getCookie('token') || 
                      manualGetCookie('accessToken') || manualGetCookie('token') ||
                      localStorage.getItem('cookie_accessToken') ||
@@ -273,45 +349,72 @@ function AuthProvider({ children }: { children: ReactNode }) {
                      localStorage.getItem('cookie_userRole') ||
                      (process.env.NODE_ENV === 'development' ? localStorage.getItem('dev_userRole') : null)) as UserRole | undefined;
         
+        // Debug all cookies
+        if (typeof document !== 'undefined') {
+          console.log('CheckAuth - All cookies:', document.cookie);
+        }
+        
+        console.log('CheckAuth - Token:', !!token, 'Role:', role, 'Current user:', !!user, 'User email:', user?.email, 'Pathname:', pathname);
+        console.log('CheckAuth - Token value:', token ? token.substring(0, 20) + '...' : 'null');
+        
+        // If no token at all, clear state only if we currently have a user
         if (!token) {
+          console.log('CheckAuth - No token found, clearing state and setting loading to false');
           if (user || accessToken) {
+            console.log('CheckAuth - Clearing auth state due to missing token');
             await clearAuthState();
           }
           setIsLoading(false);
           initialAuthCheck.current = true;
+          sessionStorage.removeItem('auth_network_errors'); // Reset network error count
           return;
         }
         
+        // If we already have a valid user with the same role as the cookie, don't re-fetch
         if (user && user.email && user.role === role && token) {
+          console.log('CheckAuth - User already valid, skipping re-fetch:', user.email, user.name, user.role);
           setAccessToken(token as string);
           setIsLoading(false);
           initialAuthCheck.current = true;
+          sessionStorage.removeItem('auth_network_errors'); // Reset network error count
           return;
         }
         
+        // If we have a token, try to load/validate user data
         try {
+          console.log('CheckAuth - Loading user data from server...');
           const userData = await loadUser(pathname);
           if (userData) {
+            console.log('CheckAuth - User loaded successfully:', userData.email, userData.name, userData.role);
             setAccessToken(token as string);
             lastValidUser.current = userData;
+            // Cache user in session storage for faster restoration
             safeSessionStorage.setItem('currentUser', JSON.stringify(userData));
             initialAuthCheck.current = true;
+            sessionStorage.removeItem('auth_network_errors'); // Reset network error count
             return;
           } else {
+            console.log('CheckAuth - No user data returned');
+            // Don't immediately clear state, try to use last valid user or cached user
             if (lastValidUser.current && token && role) {
+              console.log('CheckAuth - Using last valid user to prevent flash');
               setUser(lastValidUser.current);
               setAccessToken(token as string);
+              sessionStorage.removeItem('auth_network_errors'); // Reset network error count
               return;
             }
             
+            // Try cached user from session storage
             const cachedUser = safeSessionStorage.getItem('currentUser');
             if (cachedUser && token && role) {
               try {
                 const parsedUser = JSON.parse(cachedUser);
                 if (parsedUser && parsedUser.email && parsedUser.role === role) {
+                  console.log('CheckAuth - Using cached user to prevent flash:', parsedUser.email, parsedUser.name);
                   setUser(parsedUser);
                   setAccessToken(token as string);
                   lastValidUser.current = parsedUser;
+                  sessionStorage.removeItem('auth_network_errors'); // Reset network error count
                   return;
                 }
               } catch (e) {
@@ -323,15 +426,116 @@ function AuthProvider({ children }: { children: ReactNode }) {
           }
         } catch (err) {
           console.error('CheckAuth - Failed to load user:', err);
-          if (err && typeof err === 'object' && 'response' in err) {
-            const response = (err as any).response;
-            if (response?.status === 401 || response?.status === 403) {
+          
+          // Check if it's a network error (backend offline)
+          const isNetworkError = !err || typeof err !== 'object' || !('response' in err) || 
+                               (err as any).code === 'NETWORK_ERROR' || 
+                               (err as any).code === 'ECONNREFUSED' ||
+                               (err as any).message?.includes('Network Error') ||
+                               (err as any).message?.includes('ERR_NETWORK');
+          
+          if (isNetworkError) {
+            console.log('CheckAuth - Network error detected, incrementing error count');
+            const newErrorCount = networkErrorCount + 1;
+            sessionStorage.setItem('auth_network_errors', newErrorCount.toString());
+            
+            // Try to use cached user to prevent redirect loops when backend is offline
+            if (lastValidUser.current && token && role) {
+              console.log('CheckAuth - Network error, using last valid user');
+              setUser(lastValidUser.current);
+              setAccessToken(token as string);
+              setIsLoading(false);
+              return;
+            }
+            
+            // Try cached user from session storage
+            const cachedUser = safeSessionStorage.getItem('currentUser');
+            if (cachedUser && token && role) {
+              try {
+                const parsedUser = JSON.parse(cachedUser);
+                if (parsedUser && parsedUser.email && parsedUser.role === role) {
+                  console.log('CheckAuth - Network error, using cached user:', parsedUser.email, parsedUser.name);
+                  setUser(parsedUser);
+                  setAccessToken(token as string);
+                  lastValidUser.current = parsedUser;
+                  setIsLoading(false);
+                  return;
+                }
+              } catch (e) {
+                console.error('CheckAuth - Failed to parse cached user:', e);
+              }
+            }
+            
+            // If we have too many network errors, stop trying and clear state
+            if (newErrorCount > 3) {
+              console.log('CheckAuth - Too many network errors, clearing auth state');
               await clearAuthState();
+              return;
+            }
+          } else {
+            // Reset network error count on non-network errors
+            sessionStorage.removeItem('auth_network_errors');
+            
+            // Only clear auth state if the error indicates invalid credentials
+            if (err && typeof err === 'object' && 'response' in err) {
+              const response = (err as any).response;
+              if (response?.status === 401 || response?.status === 403) {
+                console.log('CheckAuth - Invalid credentials, clearing auth state');
+                await clearAuthState();
+              } else {
+                // For other HTTP errors, try to use cached user
+                if (lastValidUser.current && token && role) {
+                  console.log('CheckAuth - HTTP error, using cached user');
+                  setUser(lastValidUser.current);
+                  setAccessToken(token as string);
+                  setIsLoading(false);
+                  return;
+                }
+                
+                // Try cached user from session storage
+                const cachedUser = safeSessionStorage.getItem('currentUser');
+                if (cachedUser && token && role) {
+                  try {
+                    const parsedUser = JSON.parse(cachedUser);
+                    if (parsedUser && parsedUser.email && parsedUser.role === role) {
+                      console.log('CheckAuth - HTTP error, using cached user:', parsedUser.email, parsedUser.name);
+                      setUser(parsedUser);
+                      setAccessToken(token as string);
+                      lastValidUser.current = parsedUser;
+                      setIsLoading(false);
+                      return;
+                    }
+                  } catch (e) {
+                    console.error('CheckAuth - Failed to parse cached user:', e);
+                  }
+                }
+              }
             } else {
+              // For other errors, try to use cached user
               if (lastValidUser.current && token && role) {
+                console.log('CheckAuth - Error occurred, using cached user');
                 setUser(lastValidUser.current);
                 setAccessToken(token as string);
+                setIsLoading(false);
                 return;
+              }
+              
+              // Try cached user from session storage
+              const cachedUser = safeSessionStorage.getItem('currentUser');
+              if (cachedUser && token && role) {
+                try {
+                  const parsedUser = JSON.parse(cachedUser);
+                  if (parsedUser && parsedUser.email && parsedUser.role === role) {
+                    console.log('CheckAuth - Error occurred, using cached user:', parsedUser.email, parsedUser.name);
+                    setUser(parsedUser);
+                    setAccessToken(token as string);
+                    lastValidUser.current = parsedUser;
+                    setIsLoading(false);
+                    return;
+                  }
+                } catch (e) {
+                  console.error('CheckAuth - Failed to parse cached user:', e);
+                }
               }
             }
           }
@@ -340,11 +544,34 @@ function AuthProvider({ children }: { children: ReactNode }) {
         initialAuthCheck.current = true;
       } catch (error) {
         console.error('Auth check error:', error);
+        
+        // Try to preserve user state on errors
         const token = getCookie('accessToken');
         if (lastValidUser.current && token) {
+          console.log('CheckAuth - Preserving user state after error');
           setUser(lastValidUser.current);
           setAccessToken(token as string);
+          setIsLoading(false);
         } else {
+          // Try cached user from session storage
+          const cachedUser = safeSessionStorage.getItem('currentUser');
+          const role = getCookie('userRole') as UserRole | undefined;
+          if (cachedUser && token && role) {
+            try {
+              const parsedUser = JSON.parse(cachedUser);
+              if (parsedUser && parsedUser.email && parsedUser.role === role) {
+                console.log('CheckAuth - Error occurred, using cached user:', parsedUser.email, parsedUser.name);
+                setUser(parsedUser);
+                setAccessToken(token as string);
+                lastValidUser.current = parsedUser;
+                setIsLoading(false);
+                return;
+              }
+            } catch (e) {
+              console.error('CheckAuth - Failed to parse cached user:', e);
+            }
+          }
+          
           if (!user) {
             await clearAuthState();
           }
@@ -358,7 +585,9 @@ function AuthProvider({ children }: { children: ReactNode }) {
     
     let timeoutIds: NodeJS.Timeout[] = [];
     
+    // Only run auth check in browser and if we're not on auth pages
     if (isBrowser && !pathname.startsWith('/auth/')) {
+      // Wait for initialization to complete before running auth check
       if (isInitializing.current) {
         const initWaitTimeout = setTimeout(() => {
           if (!isInitializing.current) {
@@ -367,16 +596,20 @@ function AuthProvider({ children }: { children: ReactNode }) {
         }, 50);
         timeoutIds.push(initWaitTimeout);
       } else {
+        // Add a small delay to prevent race conditions on page refresh
         const checkAuthTimeout = setTimeout(checkAuth, 50);
         timeoutIds.push(checkAuthTimeout);
         
+        // Add a safety timeout to ensure loading doesn't get stuck
         const safetyTimeout = setTimeout(() => {
+          console.log('CheckAuth - Safety timeout triggered, forcing loading to false');
           setIsLoading(false);
           initialAuthCheck.current = true;
-        }, 3000);
+        }, 3000); // 3 second safety timeout
         timeoutIds.push(safetyTimeout);
       }
     } else {
+      // For auth pages, set loading to false after render to avoid hooks error
       const authPageTimeout = setTimeout(() => {
         setIsLoading(false);
         initialAuthCheck.current = true;
@@ -384,11 +617,12 @@ function AuthProvider({ children }: { children: ReactNode }) {
       timeoutIds.push(authPageTimeout);
     }
     
+    // Cleanup function
     return () => {
       timeoutIds.forEach(id => clearTimeout(id));
       authCheckInProgress.current = false;
     };
-  }, [pathname, loadUser]);
+  }, [pathname, loadUser]); // Add loadUser to dependencies but remove user to prevent loops
 
   const clearAuthState = async () => {
     setUser(null);
@@ -396,11 +630,12 @@ function AuthProvider({ children }: { children: ReactNode }) {
     setError(null);
     lastValidUser.current = null;
     
+    // Clear cookies
     deleteCookie('accessToken');
-    deleteCookie('token');
     deleteCookie('refreshToken');
     deleteCookie('userRole');
     
+    // Clear storage including localStorage fallbacks
     safeLocalStorage.removeItem('auth_token');
     safeLocalStorage.removeItem('refresh_token');
     safeLocalStorage.removeItem('cookie_accessToken');
@@ -408,12 +643,17 @@ function AuthProvider({ children }: { children: ReactNode }) {
     safeLocalStorage.removeItem('cookie_userRole');
     safeSessionStorage.removeItem('currentUser');
     
+    // Clear development localStorage items
     if (process.env.NODE_ENV === 'development') {
       safeLocalStorage.removeItem('dev_accessToken');
       safeLocalStorage.removeItem('dev_userRole');
       safeLocalStorage.removeItem('dev_rememberMe');
       safeLocalStorage.removeItem('dev_tokenExpiry');
     }
+    
+    // Clear network error tracking
+    sessionStorage.removeItem('auth_network_errors');
+    sessionStorage.removeItem('auth_redirect_pending');
   };
 
   const login = async (email: string, password: string, rememberMe: boolean = false) => {
@@ -421,25 +661,41 @@ function AuthProvider({ children }: { children: ReactNode }) {
     setError(null);
 
     try {
+      console.log('AuthContext: Starting login process for email:', email);
+      console.log('AuthContext: Current cookies before login:', document.cookie);
+      
       const response = await authService.login({ email, password });
+      console.log('AuthContext: Login response received:', {
+        hasUser: !!response?.user,
+        hasAccessToken: !!response?.accessToken,
+        userEmail: response?.user?.email,
+        userRole: response?.user?.role,
+        tokenLength: response?.accessToken?.length
+      });
 
-      if (!response || !response.user || (!response.accessToken && !response.token)) {
+      if (!response || !response.user || !response.accessToken) {
         throw new Error('Invalid login response from server');
       }
 
-      const tokenToUse = response.accessToken || response.token;
-
+      // Ensure consistent name handling with better validation
       let userName = response.user.name?.trim();
       
+      // Check if name is valid and not a placeholder
       if (!userName || userName === '' || userName === 'null' || userName === 'undefined' || userName === 'User') {
         userName = response.user.email?.split('@')[0] || email.split('@')[0] || 'User';
       }
+      
+      console.log('AuthContext - Login - User name processing:', {
+        originalName: response.user.name,
+        processedName: userName,
+        email: response.user.email || email
+      });
       
       const safeUser: User = {
         id: response.user.id,
         email: response.user.email || email,
         name: userName,
-        role: response.user.role,
+        role: response.user.role || 'customer',
         isActive: response.user.isActive ?? true,
         tokenVersion: response.user.tokenVersion || '0',
         lastPasswordChange: response.user.lastPasswordChange || new Date().toISOString(),
@@ -453,11 +709,17 @@ function AuthProvider({ children }: { children: ReactNode }) {
         path: '/',
         secure: process.env.NODE_ENV === 'production' ? true : false,
         sameSite: 'lax' as const,
-        httpOnly: false,
+        httpOnly: false, // Must be false for client-side access
       };
 
-      const tokenMaxAge = rememberMe ? 60 * 60 * 24 * 30 : 60 * 60 * 24;
-      const roleMaxAge = rememberMe ? 60 * 60 * 24 * 30 : 60 * 60 * 24 * 7;
+      console.log('AuthContext - Setting cookies with options:', cookieOptions);
+      console.log('AuthContext - Remember Me:', rememberMe);
+      console.log('AuthContext - Token expiration:', rememberMe ? '30 days' : '24 hours');
+      console.log('AuthContext - Setting accessToken:', response.accessToken?.substring(0, 20) + '...');
+
+      // Set cookies with different expiration times based on rememberMe
+      const tokenMaxAge = rememberMe ? 60 * 60 * 24 * 30 : 60 * 60 * 24; // 30 days if remember me, 24 hours otherwise
+      const roleMaxAge = rememberMe ? 60 * 60 * 24 * 30 : 60 * 60 * 24 * 7; // 30 days if remember me, 7 days otherwise
       
       const tokenOptions = { 
         ...cookieOptions, 
@@ -471,44 +733,91 @@ function AuthProvider({ children }: { children: ReactNode }) {
         expires: new Date(Date.now() + roleMaxAge * 1000)
       };
 
-      setCookie('accessToken', tokenToUse, tokenOptions);
-      setCookie('token', tokenToUse, tokenOptions);
+      // Set cookies using cookies-next
+      setCookie('accessToken', response.accessToken, tokenOptions);
       setCookie('userRole', safeUser.role, roleOptions);
       
       if (response.refreshToken) {
         setCookie('refreshToken', response.refreshToken, roleOptions);
       }
 
-      manualSetCookie('accessToken', tokenToUse, tokenOptions);
-      manualSetCookie('token', tokenToUse, tokenOptions);
+      // Also set cookies manually as fallback
+      manualSetCookie('accessToken', response.accessToken, tokenOptions);
       manualSetCookie('userRole', safeUser.role, roleOptions);
       
       if (response.refreshToken) {
         manualSetCookie('refreshToken', response.refreshToken, roleOptions);
       }
 
+      // Verify cookies were set immediately
+      console.log('AuthContext - Cookies set, verifying...');
+      console.log('AuthContext - Current cookies after setting:', document.cookie);
+      
+      // Store token in localStorage as primary storage for development reliability
       if (process.env.NODE_ENV === 'development') {
-        localStorage.setItem('dev_accessToken', tokenToUse);
+        console.log('AuthContext - Development mode: storing token in localStorage for reliability');
+        localStorage.setItem('dev_accessToken', response.accessToken);
         localStorage.setItem('dev_userRole', safeUser.role);
         localStorage.setItem('dev_rememberMe', rememberMe.toString());
         localStorage.setItem('dev_tokenExpiry', (Date.now() + tokenMaxAge * 1000).toString());
       }
       
-      setAccessToken(tokenToUse);
+      setTimeout(() => {
+        const verifyToken = getCookie('accessToken') || manualGetCookie('accessToken') || 
+                           getDevToken();
+        const verifyRole = getCookie('userRole') || manualGetCookie('userRole') || 
+                          (process.env.NODE_ENV === 'development' ? localStorage.getItem('dev_userRole') : null);
+        console.log('AuthContext - Cookie verification - Token:', !!verifyToken, 'Role:', verifyRole);
+        console.log('AuthContext - All cookies after timeout:', document.cookie);
+        
+        if (!verifyToken) {
+          console.error('AuthContext - ERROR: Token not found after setting!');
+          // Try to set cookies again with a simpler method
+          document.cookie = `accessToken=${response.accessToken}; path=/; max-age=${tokenMaxAge}`;
+          document.cookie = `userRole=${safeUser.role}; path=/; max-age=${roleMaxAge}`;
+          console.log('AuthContext - Fallback cookies set, checking again:', document.cookie);
+        } else {
+          console.log('AuthContext - Token verification successful!');
+        }
+      }, 100);
+
+      // Update state immediately to prevent race conditions
+      setAccessToken(response.accessToken);
       setUser(safeUser);
       lastValidUser.current = safeUser;
+      // Cache user in session storage for faster restoration
       safeSessionStorage.setItem('currentUser', JSON.stringify(safeUser));
+      console.log('AuthContext: User state updated immediately:', safeUser);
 
+      console.log('AuthContext: Login successful, preparing redirect...');
+      
+      // Success message logged
+      console.log(`Welcome back, ${safeUser.name}! Logged in as ${safeUser.role}`);
+
+      // Redirect immediately without delay to prevent race conditions
       const redirectPath = getRoleBasedRedirect(safeUser.role);
+      console.log('AuthContext: Redirecting to:', redirectPath);
+      
+      // Clear any redirect flags before redirecting
+      sessionStorage.removeItem('auth_redirect_pending');
+      sessionStorage.removeItem('auth_network_errors');
+      
       router.replace(redirectPath);
 
+      console.log('AuthContext: Login process completed successfully');
       return { success: true, user: safeUser };
     } catch (error: any) {
       console.error('AuthContext: Login error:', error);
+      console.error('AuthContext: Error details:', {
+        message: error?.message,
+        response: error?.response?.data,
+        status: error?.response?.status
+      });
       const errorMessage = error?.response?.data?.message || 'Login failed. Please try again.';
       setError(errorMessage);
       return { success: false, error: errorMessage };
     } finally {
+      console.log('AuthContext: Login process finished, setting loading to false');
       setIsLoading(false);
     }
   };
@@ -519,10 +828,12 @@ function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('Logout error:', err);
     } finally {
+      // Clear all auth-related cookies with all possible options to ensure they're removed
       const clearAllCookies = () => {
         const cookies = document.cookie.split(';');
         const domain = window.location.hostname;
         
+        // Clear cookies with domain
         cookies.forEach(cookie => {
           const [name] = cookie.split('=').map(c => c.trim());
           if (name) {
@@ -533,6 +844,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
       };
 
       try {
+        // Clear cookies using deleteCookie with all possible options
         const domains = [
           window.location.hostname,
           `.${window.location.hostname}`,
@@ -540,13 +852,17 @@ function AuthProvider({ children }: { children: ReactNode }) {
           `.${window.location.hostname.split('.').slice(-2).join('.')}`
         ];
 
+        // Ensure we clear all variations of the cookies
         ['accessToken', 'refreshToken', 'token', 'userRole', 'auth_token', 'refresh_token'].forEach(cookieName => {
+          // Clear with all possible domain variations
           domains.forEach(domain => {
             document.cookie = `${cookieName}=; path=/; domain=${domain}; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
           });
+          // Clear without domain
           document.cookie = `${cookieName}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
         });
 
+        // Also try the deleteCookie function
         const cookieOptions = {
           path: '/',
           secure: process.env.NODE_ENV === 'production',
@@ -557,22 +873,44 @@ function AuthProvider({ children }: { children: ReactNode }) {
           deleteCookie(cookieName, cookieOptions);
         });
 
+        // Clear all cookies as a last resort
         clearAllCookies();
       } catch (e) {
         console.error('Error clearing cookies:', e);
       }
 
+      // Clear local storage and session storage
       if (typeof window !== 'undefined') {
+        // Preserve "Remember Me" credentials before clearing
+        const rememberedEmail = localStorage.getItem('rememberedEmail');
+        const rememberedPassword = localStorage.getItem('rememberedPassword');
+        const wasRemembered = localStorage.getItem('wasRemembered');
+        
+        // Clear all storage
         localStorage.clear();
         sessionStorage.clear();
+        
+        // Restore "Remember Me" credentials if they existed
+        if (rememberedEmail && rememberedPassword && wasRemembered === 'true') {
+          localStorage.setItem('rememberedEmail', rememberedEmail);
+          localStorage.setItem('rememberedPassword', rememberedPassword);
+          localStorage.setItem('wasRemembered', wasRemembered);
+          console.log('AuthContext: Preserved Remember Me credentials during logout');
+        }
       }
 
+      // Reset state
       setUser(null);
       setAccessToken(null);
       setError(null);
 
+      // Redirect to login
       if (typeof window !== 'undefined') {
-        window.location.href = '/auth/login';
+        // Prevent infinite redirect loops
+        if (!sessionStorage.getItem('auth_redirect_pending')) {
+          sessionStorage.setItem('auth_redirect_pending', 'true');
+          window.location.href = '/auth/login';
+        }
       }
     }
   };
@@ -589,8 +927,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
     setError(null);
 
     try {
-      const response = await authService.register(userData);
-      const tokenToUse = response.accessToken || response.token;
+      const { user, accessToken, refreshToken } = await authService.register(userData);
 
       const cookieOptions = {
         path: '/',
@@ -598,21 +935,22 @@ function AuthProvider({ children }: { children: ReactNode }) {
         sameSite: 'lax' as const,
       };
 
-      setCookie('accessToken', tokenToUse, cookieOptions);
-      setCookie('token', tokenToUse, cookieOptions);
-      setCookie('refreshToken', response.refreshToken, cookieOptions);
+      setCookie('accessToken', accessToken, cookieOptions);
+      setCookie('refreshToken', refreshToken, cookieOptions);
 
       const registeredUser: User = {
-        ...response.user,
-        zoneId: coerceOptionalNumber((response.user as any).zoneId),
-        customerId: coerceOptionalNumber((response.user as any).customerId),
-        tokenVersion: response.user.tokenVersion || '0',
-        name: response.user.name || response.user.email?.split('@')[0] || 'User',
+        ...user,
+        zoneId: coerceOptionalNumber((user as any).zoneId),
+        customerId: coerceOptionalNumber((user as any).customerId),
+        tokenVersion: user.tokenVersion || '0',
+        name: user.name || user.email?.split('@')[0] || 'User',
       };
 
       setUser(registeredUser);
 
-      router.replace(getRoleBasedRedirect(response.user.role));
+      console.log('Account created successfully!', `Welcome ${registeredUser.name}!`);
+
+      router.replace(getRoleBasedRedirect(registeredUser.role));
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || 'Registration failed. Please try again.';
       setError(errorMessage);
@@ -655,5 +993,4 @@ export const useAuth = (): AuthContextType => {
   return context;
 };
 
-export { AuthProvider };
 export default AuthProvider;

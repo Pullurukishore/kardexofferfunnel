@@ -16,8 +16,8 @@ router.get('/', OfferController.getOffers);
 // Get single offer
 router.get('/:id', OfferController.getOffer);
 
-// Create offer (admin only)
-router.post('/', authorize('ADMIN'), OfferController.createOffer);
+// Create offer (both admin and zone users)
+router.post('/', OfferController.createOffer);
 
 // Update offer (both admin and zone users)
 router.put('/:id', OfferController.updateOffer);

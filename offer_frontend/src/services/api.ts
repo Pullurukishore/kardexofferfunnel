@@ -1,7 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 import { getCookie, setCookie, deleteCookie } from 'cookies-next';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/api';
 
 // Helper function to get cookie value (works in client-side)
 const getTokenFromCookie = (): string | null => {
@@ -19,6 +19,8 @@ const getTokenFromCookie = (): string | null => {
 
 class ApiService {
   public api: AxiosInstance;
+  private isRefreshing: boolean = false;
+  private refreshSubscribers: Array<(token: string | null) => void> = [];
 
   constructor() {
     this.api = axios.create({
@@ -67,25 +69,67 @@ class ApiService {
         if (error.response?.status === 401 && !originalRequest._retry) {
           originalRequest._retry = true;
 
-          try {
-            const refreshToken = getCookie('refreshToken');
-            if (refreshToken) {
-              const response = await axios.post(`${API_URL}/auth/refresh`, {
-                refreshToken,
+          if (this.isRefreshing) {
+            // Queue the request until refresh completes
+            return new Promise((resolve, reject) => {
+              this.refreshSubscribers.push((newToken: string | null) => {
+                if (newToken) {
+                  originalRequest.headers = originalRequest.headers || {};
+                  originalRequest.headers.Authorization = `Bearer ${newToken}`;
+                }
+                this.api(originalRequest).then(resolve).catch(reject);
               });
-              const { token, accessToken } = response.data;
-              const tokenToSet = accessToken || token;
-              setCookie('accessToken', tokenToSet);
-              setCookie('token', tokenToSet);
-              originalRequest.headers.Authorization = `Bearer ${tokenToSet}`;
-              return this.api(originalRequest);
+            });
+          }
+
+          this.isRefreshing = true;
+          try {
+            // Server reads httpOnly refresh cookie; just send credentials
+            const response = await axios.post(
+              `${API_URL}/auth/refresh`,
+              {},
+              { withCredentials: true }
+            );
+
+            const { accessToken, token } = response.data || {};
+            const tokenToUse = accessToken || token || null;
+
+            // Update default header for subsequent requests
+            if (tokenToUse) {
+              this.api.defaults.headers.common['Authorization'] = `Bearer ${tokenToUse}`;
             }
+
+            // Process queued requests
+            this.refreshSubscribers.forEach((cb) => cb(tokenToUse));
+            this.refreshSubscribers = [];
+
+            // Retry the original request
+            if (tokenToUse) {
+              originalRequest.headers = originalRequest.headers || {};
+              originalRequest.headers.Authorization = `Bearer ${tokenToUse}`;
+            }
+            return this.api(originalRequest);
           } catch (refreshError) {
+            // If refresh fails, clear any client-side tokens and redirect to login
+            this.refreshSubscribers.forEach((cb) => cb(null));
+            this.refreshSubscribers = [];
             deleteCookie('accessToken');
             deleteCookie('token');
             deleteCookie('refreshToken');
-            window.location.href = '/auth/login';
+            
+            // Prevent infinite redirect loops
+            if (typeof window !== 'undefined' && window.location.pathname !== '/auth/login') {
+              // Add flag to prevent multiple redirects
+              if (!sessionStorage.getItem('auth_redirect_pending')) {
+                sessionStorage.setItem('auth_redirect_pending', 'true');
+                setTimeout(() => {
+                  window.location.href = '/auth/login';
+                }, 100);
+              }
+            }
             return Promise.reject(refreshError);
+          } finally {
+            this.isRefreshing = false;
           }
         }
 
@@ -257,6 +301,16 @@ class ApiService {
     return response.data;
   }
 
+  async createZone(data: any) {
+    const response = await this.api.post('/admin/zones', data);
+    return response.data;
+  }
+
+  async updateZone(zoneId: number, data: any) {
+    const response = await this.api.put(`/admin/zones/${zoneId}`, data);
+    return response.data;
+  }
+
   // Spare Parts endpoints
   async getSpareParts(params?: any) {
     const response = await this.api.get('/spare-parts', { params });
@@ -299,6 +353,11 @@ class ApiService {
     return response.data;
   }
 
+  async getZoneUsers(params?: any) {
+    const response = await this.api.get('/admin/zone-users', { params });
+    return response.data;
+  }
+
   // Dashboard endpoints
   async getAdminDashboard(params?: any) {
     const response = await this.api.get('/dashboard/admin', { params });
@@ -310,12 +369,27 @@ class ApiService {
     return response.data;
   }
 
+  async getZoneManagerDashboard(params?: any) {
+    const response = await this.api.get('/dashboard/zone-manager', { params });
+    return response.data;
+  }
+
   async getSidebarStats() {
     const response = await this.api.get('/dashboard/sidebar-stats');
     return response.data;
   }
 
   // Reports endpoints
+  async generateReport(params?: any) {
+    const response = await this.api.get('/reports/generate', { params });
+    return response.data;
+  }
+
+  async getOfferDetails(offerId: number) {
+    const response = await this.api.get(`/reports/offers/${offerId}`);
+    return response.data;
+  }
+
   async getAnalyticsReport(params?: any) {
     const response = await this.api.get('/reports/analytics', { params });
     return response.data;
@@ -329,6 +403,11 @@ class ApiService {
   // Activity endpoints
   async getAllActivities(params?: any) {
     const response = await this.api.get('/activities', { params });
+    return response.data;
+  }
+
+  async getZoneActivities(params?: any) {
+    const response = await this.api.get('/activities/zone', { params });
     return response.data;
   }
 
@@ -349,6 +428,36 @@ class ApiService {
 
   async getActivityHeatmap(params?: any) {
     const response = await this.api.get('/activities/heatmap', { params });
+    return response.data;
+  }
+
+  async getActivityComparison(params?: any) {
+    const response = await this.api.get('/activities/comparison', { params });
+    return response.data;
+  }
+
+  async getActivityByEntity(params?: any) {
+    const response = await this.api.get('/activities/by-entity', { params });
+    return response.data;
+  }
+
+  async getUserLeaderboard(params?: any) {
+    const response = await this.api.get('/activities/leaderboard', { params });
+    return response.data;
+  }
+
+  async getSecurityAlerts(params?: any) {
+    const response = await this.api.get('/activities/security-alerts', { params });
+    return response.data;
+  }
+
+  async getWorkflowAnalysis(params?: any) {
+    const response = await this.api.get('/activities/workflow-analysis', { params });
+    return response.data;
+  }
+
+  async getComplianceReport(params?: any) {
+    const response = await this.api.get('/activities/compliance-report', { params });
     return response.data;
   }
 
@@ -380,6 +489,11 @@ class ApiService {
 
   async bulkUpdateUserStatus(userIds: number[], isActive: boolean) {
     const response = await this.api.post('/users/bulk/status', { userIds, isActive });
+    return response.data;
+  }
+
+  async changeUserPassword(userId: number, newPassword: string) {
+    const response = await this.api.post(`/users/${userId}/change-password`, { newPassword });
     return response.data;
   }
 
@@ -446,6 +560,58 @@ class ApiService {
 
   async getTargetDashboard(params?: any) {
     const response = await this.api.get('/targets/dashboard', { params });
+    return response.data;
+  }
+
+  async getTargetsSummary() {
+    const response = await this.api.get('/targets/summary');
+    return response.data;
+  }
+
+  async getZoneTargetDetails(zoneId: number, targetPeriod: string, periodType: string) {
+    const response = await this.api.get(`/reports/targets/${zoneId}`, {
+      params: { type: 'zone', targetPeriod, periodType }
+    });
+    return response.data;
+  }
+
+  async getUserTargetDetails(userId: number, targetPeriod: string, periodType: string) {
+    const response = await this.api.get(`/reports/targets/${userId}`, {
+      params: { type: 'user', targetPeriod, periodType }
+    });
+    return response.data;
+  }
+
+  // Product Type Analysis Report
+  async getProductTypeAnalysis(params?: any) {
+    const response = await this.api.get('/reports/product-type-analysis', { params });
+    return response.data;
+  }
+
+  // Customer Performance Report
+  async getCustomerPerformance(params?: any) {
+    const response = await this.api.get('/reports/customer-performance', { params });
+    return response.data;
+  }
+
+  // Forecast endpoints
+  async getForecastSummary(params?: any) {
+    const response = await this.api.get('/forecasts/summary', { params });
+    return response.data;
+  }
+
+  async getForecastBreakdown(params?: any) {
+    const response = await this.api.get('/forecasts/zone-user-breakdown', { params });
+    return response.data;
+  }
+
+  async getForecastPoExpected(params?: any) {
+    const response = await this.api.get('/forecasts/po-expected', { params });
+    return response.data;
+  }
+
+  async getForecastHighlights(params?: any) {
+    const response = await this.api.get('/forecasts/highlights', { params });
     return response.data;
   }
 }

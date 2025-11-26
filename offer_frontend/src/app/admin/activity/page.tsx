@@ -1,68 +1,31 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
-  Activity,
-  BarChart3,
-  Bell, 
-  Search, 
-  Filter, 
-  Download, 
-  RefreshCw, 
-  User, 
-  FileText, 
-  Edit, 
-  Trash2, 
-  Plus, 
-  CheckCircle, 
-  XCircle, 
-  Clock,
-  AlertTriangle,
-  Info,
-  Eye,
-  Loader2,
-  TrendingUp,
-  TrendingDown,
+  Activity, 
+  TrendingUp, 
   Calendar,
-  MapPin,
-  Zap,
   Shield,
-  Globe,
-  Monitor,
   Users,
+  Clock,
+  Eye,
   Target,
-  Timer,
-  ArrowUp,
-  ArrowDown
-} from 'lucide-react'
-import { 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer, 
-  AreaChart, 
-  Area, 
-  PieChart, 
-  Pie, 
-  Cell,
-  BarChart,
-  Bar
-} from 'recharts'
-import { apiService } from '@/services/api'
+  Package,
+  Building,
+  FileText,
+  RefreshCw,
+  Download,
+  ChevronRight,
+  X,
+  Info,
+  User,
+  ArrowRight
+} from 'lucide-react';
+import { apiService } from '@/services/api';
 
 interface ActivityLog {
   id: number
@@ -73,780 +36,634 @@ interface ActivityLog {
   ipAddress: string | null
   userAgent: string | null
   createdAt: string
-  userId: number | null
-  offerId: number | null
+  userId: number
+  offerId?: number | null
   user: {
     id: number
-    name: string | null
+    name: string
     email: string
-    role?: string
-  } | null
-}
-
-interface ActivityResponse {
-  success: boolean
-  activities: ActivityLog[]
-  pagination: {
-    total: number
-    page: number
-    limit: number
-    pages: number
-  }
-  stats: {
-    total: number
-    todayCount: number
-    yesterdayCount: number
-    weekCount: number
-    monthCount: number
-    todayVsYesterday: number
-    uniqueUsersCount: number
-    actionCounts: Record<string, number>
-    entityTypeStats: Record<string, number>
-  }
-  analytics: {
-    hourlyActivity: Array<{ hour: string; count: number }>
-    topUsers: Array<{ id: number; name: string; email: string; role: string; activityCount: number }>
-    entityTypes: Array<{ entityType: string; _count: number }>
-    ipAddresses: Array<{ ipAddress: string; _count: number }>
-  }
-  uniqueUsers: Array<{ id: number; name: string; email: string; role: string; activityCount: number }>
-}
-
-interface ActivityStats {
-  totalActivities: number
-  offerCreated: number
-  offerUpdated: number
-  offerDeleted: number
-  statusChanged: number
-  avgActivitiesPerDay: number
-  topUsers: Array<{ userId: number; userName: string; userEmail: string; userRole: string; activityCount: number }>
-  dailyTrend: Array<{ date: string; count: number; unique_users: number }>
-  peakHours: Array<{ hour: number; count: number }>
-  riskActivities: number
-  timeframeAnalysis: {
-    period: number
-    velocity: number
-    efficiency: number
+    role: string
   }
 }
 
-const actionTypes = [
-  'All Actions',
-  'OFFER_CREATED',
-  'OFFER_UPDATED',
-  'OFFER_DELETED',
-  'OFFER_STATUS_UPDATED',
-  'OFFER_NOTE_ADDED',
-  'USER_LOGIN',
-  'USER_LOGOUT',
-  'TARGET_CREATED',
-  'TARGET_UPDATED'
-]
-
-const timeframeOptions = [
-  { label: 'Last 24 Hours', value: '1d' },
-  { label: 'Last 7 Days', value: '7d' },
-  { label: 'Last 30 Days', value: '30d' },
-  { label: 'Last 90 Days', value: '90d' },
-  { label: 'Last Year', value: '1y' }
-]
-
-const viewModes = [
-  { label: 'Timeline', value: 'timeline' },
-  { label: 'Analytics', value: 'analytics' },
-  { label: 'Real-time', value: 'realtime' }
-]
-
-export default function ActivityLogs() {
-  const [activityData, setActivityData] = useState<ActivityResponse | null>(null)
-  const [activityStats, setActivityStats] = useState<ActivityStats | null>(null)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [selectedAction, setSelectedAction] = useState('All Actions')
-  const [selectedUser, setSelectedUser] = useState('All Users')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [timeframe, setTimeframe] = useState('7d')
-  const [viewMode, setViewMode] = useState('timeline')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [autoRefresh, setAutoRefresh] = useState(false)
-  const [realtimeActivities, setRealtimeActivities] = useState<ActivityLog[]>([])
-  const intervalRef = useRef<NodeJS.Timeout | null>(null)
+export default function ActivityPage() {
+  const [timeframe, setTimeframe] = useState('7');
+  const [selectedUser, setSelectedUser] = useState('all');
+  const [selectedAction, setSelectedAction] = useState('all');
+  const [users, setUsers] = useState<Array<{id: number, name: string, email: string, role: string}>>([]);
+  const [loading, setLoading] = useState(true);
+  const [activities, setActivities] = useState<ActivityLog[]>([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [selectedActivity, setSelectedActivity] = useState<ActivityLog | null>(null);
+  const [renderKey, setRenderKey] = useState(0); // Force re-render for color updates
 
   useEffect(() => {
-    fetchActivities()
-    if (viewMode === 'analytics') {
-      fetchActivityStats()
-    }
-  }, [searchTerm, selectedAction, selectedUser, dateFrom, dateTo, currentPage, timeframe, viewMode])
+    // Reset and fetch when filters change
+    setPage(1);
+    fetchActivities(1, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeframe, selectedUser, selectedAction]);
 
   useEffect(() => {
-    if (autoRefresh && viewMode === 'realtime') {
-      intervalRef.current = setInterval(() => {
-        fetchRealtimeActivities()
-      }, 5000) // Refresh every 5 seconds
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
-    }
+    // Fetch users on component mount
+    fetchUsers();
+  }, []);
 
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-      }
-    }
-  }, [autoRefresh, viewMode])
-
-  const fetchActivities = async () => {
+  const fetchUsers = async () => {
     try {
-      setLoading(true)
-      setError(null)
-      const params: any = {
-        page: currentPage,
+      const response = await apiService.getUsers();
+      console.log('ADMIN PAGE - getUsers response:', response); // Debug log
+      // API returns { success: true, data: { users: [...] } }
+      const usersData = response.data?.users || response.users || [];
+      console.log('ADMIN PAGE - Total users fetched:', usersData.length); // Debug log
+      setUsers(usersData);
+    } catch (error) {
+      console.error('Failed to fetch users:', error);
+      setUsers([]); // Set empty array on error
+    }
+  };
+
+  const mapTimeframe = (tf: string) => `${tf}d`;
+
+  const fetchActivities = async (targetPage = page, replace = false) => {
+    try {
+      if (replace) setLoading(true);
+      const response = await apiService.getAllActivities({
+        timeframe: mapTimeframe(timeframe),
+        page: targetPage,
         limit: 50,
-        timeframe
-      }
-      if (searchTerm) params.search = searchTerm
-      if (selectedAction !== 'All Actions') params.action = selectedAction
-      if (selectedUser !== 'All Users') params.userId = selectedUser
-      if (dateFrom) params.startDate = new Date(dateFrom).toISOString()
-      if (dateTo) params.endDate = new Date(dateTo).toISOString()
-
-      const data = await apiService.getAllActivities(params)
-      setActivityData(data)
-    } catch (err) {
-      console.error('Failed to fetch activities:', err)
-      setError('Failed to load activity logs')
+        userId: selectedUser !== 'all' ? parseInt(selectedUser) : undefined,
+        action: selectedAction !== 'all' ? selectedAction : undefined,
+      });
+      const newItems: ActivityLog[] = response.activities || [];
+      setActivities((prev) => (replace ? newItems : [...prev, ...newItems]));
+      const pagination = response.pagination || {};
+      const totalPages = pagination.pages || 1;
+      setHasMore(targetPage < totalPages);
+    } catch (error) {
+      console.error('Failed to fetch activities:', error);
     } finally {
-      setLoading(false)
+      if (replace) setLoading(false);
     }
-  }
+  };
 
-  const fetchActivityStats = async () => {
-    try {
-      const data = await apiService.getActivityStats({ timeframe })
-      setActivityStats(data.stats)
-    } catch (err) {
-      console.error('Failed to fetch activity stats:', err)
-    }
-  }
-
-  const fetchRealtimeActivities = async () => {
-    try {
-      const lastActivity = realtimeActivities[0]
-      const since = lastActivity ? lastActivity.createdAt : new Date(Date.now() - 5 * 60 * 1000).toISOString()
-      const data = await apiService.getRealtimeActivities({ since })
-      if (data.activities.length > 0) {
-        setRealtimeActivities(prev => [...data.activities, ...prev].slice(0, 100))
-      }
-    } catch (err) {
-      console.error('Failed to fetch realtime activities:', err)
-    }
-  }
-
-  const getSeverity = (action: string) => {
-    if (action.includes('CREATED')) return 'success'
-    if (action.includes('DELETED') || action.includes('FAILED')) return 'error'
-    if (action.includes('UPDATED') || action.includes('STATUS')) return 'info'
-    return 'info'
-  }
-
-  const getSeverityIcon = (action: string) => {
-    const severity = getSeverity(action)
-    switch (severity) {
-      case 'success':
-        return <CheckCircle className="h-4 w-4 text-green-600" />
-      case 'error':
-        return <XCircle className="h-4 w-4 text-red-600" />
-      default:
-        return <Info className="h-4 w-4 text-blue-600" />
-    }
-  }
-
-  const getSeverityColor = (action: string) => {
-    const severity = getSeverity(action)
-    switch (severity) {
-      case 'success':
-        return 'text-green-600 bg-green-50 border-green-200'
-      case 'error':
-        return 'text-red-600 bg-red-50 border-red-200'
-      default:
-        return 'text-blue-600 bg-blue-50 border-blue-200'
-    }
-  }
-
-  const getActionIcon = (action: string) => {
-    if (action.includes('OFFER')) return <FileText className="h-4 w-4" />
-    if (action.includes('USER')) return <User className="h-4 w-4" />
-    if (action.includes('LOGIN')) return <User className="h-4 w-4" />
-    return <Bell className="h-4 w-4" />
-  }
-
-  const formatTimestamp = (timestamp: string) => {
-    return new Date(timestamp).toLocaleString('en-IN', {
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    })
-  }
-
-  const handleExport = async () => {
-    try {
-      const params = {
-        search: searchTerm,
-        action: selectedAction !== 'All Actions' ? selectedAction : undefined,
-        userId: selectedUser !== 'All Users' ? selectedUser : undefined,
-        startDate: dateFrom ? new Date(dateFrom).toISOString() : undefined,
-        endDate: dateTo ? new Date(dateTo).toISOString() : undefined,
-        format: 'csv'
-      }
-      
-      // Create CSV content
-      const activities = activityData?.activities || []
-      const headers = ['Timestamp', 'User', 'Action', 'Entity Type', 'Entity ID', 'IP Address']
-      const csvContent = [
-        headers.join(','),
-        ...activities.map(activity => [
-          new Date(activity.createdAt).toLocaleString(),
-          activity.user?.name || activity.user?.email || 'System',
-          activity.action,
-          activity.entityType,
-          activity.entityId || '',
-          activity.ipAddress || ''
-        ].map(field => `"${field}"`).join(','))
-      ].join('\n')
-      
-      // Download CSV
-      const blob = new Blob([csvContent], { type: 'text/csv' })
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `activity-logs-${new Date().toISOString().split('T')[0]}.csv`
-      a.click()
-      window.URL.revokeObjectURL(url)
-    } catch (err) {
-      console.error('Export failed:', err)
-    }
-  }
-
-  const refreshLogs = () => {
-    fetchActivities()
-    if (viewMode === 'analytics') {
-      fetchActivityStats()
-    }
-    if (viewMode === 'realtime') {
-      fetchRealtimeActivities()
-    }
-  }
-
-  const clearFilters = () => {
-    setSearchTerm('')
-    setSelectedAction('All Actions')
-    setSelectedUser('All Users')
-    setDateFrom('')
-    setDateTo('')
-    setTimeframe('7d')
-    setCurrentPage(1)
-  }
-
-  const getActionDescription = (log: ActivityLog): string => {
-    const actionMap: Record<string, string> = {
-      'OFFER_CREATED': `Created offer ${log.entityId}`,
-      'OFFER_UPDATED': `Updated offer ${log.entityId}`,
-      'OFFER_DELETED': `Deleted offer ${log.entityId}`,
-      'OFFER_STATUS_UPDATED': `Changed status for ${log.entityId}`,
-      'OFFER_NOTE_ADDED': `Added note to ${log.entityId}`,
-      'USER_LOGIN': 'User logged in',
-      'USER_LOGOUT': 'User logged out',
-      'TARGET_CREATED': `Created target ${log.entityId}`,
-      'TARGET_UPDATED': `Updated target ${log.entityId}`
-    }
-    return actionMap[log.action] || log.action
-  }
-
-  const uniqueUsers = activityData 
-    ? ['All Users', ...activityData.uniqueUsers.map(u => String(u.id))]
-    : ['All Users']
-
-  const getUserName = (userId: string) => {
-    if (!activityData || userId === 'All Users') return userId
-    const user = activityData.uniqueUsers.find(u => String(u.id) === userId)
-    return user ? (user.name || user.email) : userId
-  }
-
-  const getRoleColor = (role: string) => {
-    const colors: Record<string, string> = {
-      'ADMIN': 'bg-purple-100 text-purple-800',
-      'ZONE_USER': 'bg-blue-100 text-blue-800',
-      'USER': 'bg-green-100 text-green-800'
-    }
-    return colors[role] || 'bg-gray-100 text-gray-800'
-  }
-
-  const formatTimeAgo = (timestamp: string) => {
-    const now = new Date().getTime()
-    const activityTime = new Date(timestamp).getTime()
-    const diffInMinutes = Math.floor((now - activityTime) / (1000 * 60))
+  const formatActivityDetails = (activity: ActivityLog) => {
+    if (!activity.details) return '';
     
-    if (diffInMinutes < 1) return 'Just now'
-    if (diffInMinutes < 60) return `${diffInMinutes}m ago`
-    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`
-    return `${Math.floor(diffInMinutes / 1440)}d ago`
-  }
+    const details = activity.details;
+    
+    // Handle offer updates with changes
+    if (activity.action === 'OFFER_UPDATED' && details.changes) {
+      const changeList = Object.entries(details.changes).map(([field, change]: [string, any]) => {
+        // Special formatting for stage changes
+        if (field === 'stage') {
+          return `Stage: ${change.from} → ${change.to}`;
+        }
+        // Special formatting for status changes  
+        if (field === 'status') {
+          return `Status: ${change.from} → ${change.to}`;
+        }
+        // Format value changes
+        if (field === 'offerValue' || field === 'poValue') {
+          return `${field}: ₹${change.from?.toLocaleString() || 0} → ₹${change.to?.toLocaleString() || 0}`;
+        }
+        // Format date changes
+        if (field.includes('Date') || field.includes('Month')) {
+          return `${field}: ${change.from || 'N/A'} → ${change.to || 'N/A'}`;
+        }
+        // General field changes
+        return `${field}: ${change.from || 'N/A'} → ${change.to || 'N/A'}`;
+      });
+      return changeList.join(', ');
+    }
+    
+    // Handle offer creation
+    if (activity.action === 'OFFER_CREATED') {
+      const parts = [];
+      if (details.title) parts.push(`"${details.title}"`);
+      if (details.stage) parts.push(`Stage: ${details.stage}`);
+      if (details.offerValue) parts.push(`Value: ₹${details.offerValue?.toLocaleString() || 0}`);
+      if (details.productType) parts.push(`Type: ${details.productType}`);
+      return parts.join(' • ');
+    }
+    
+    // Handle offer status updates
+    if (activity.action === 'OFFER_STATUS_UPDATED') {
+      const parts = [] as string[];
+      if (details.fromStatus || details.toStatus) {
+        parts.push(`Status: ${details.fromStatus || 'N/A'} → ${details.toStatus || 'N/A'}`);
+      }
+      if (details.fromStage || details.toStage) {
+        parts.push(`Stage: ${details.fromStage || 'N/A'} → ${details.toStage || 'N/A'}`);
+      }
+      if (details.notes) parts.push(`Notes: ${details.notes}`);
+      return parts.join(' • ');
+    }
 
-  if (loading && !activityData) {
+    // Handle offer note added
+    if (activity.action === 'OFFER_NOTE_ADDED') {
+      if (details.content) return `Note: ${details.content}`;
+    }
+
+    // Handle offer deletion
+    if (activity.action === 'OFFER_DELETED') {
+      return `Offer ${activity.entityId || ''} deleted`;
+    }
+    
+    // Handle user actions
+    if (activity.action.includes('USER')) {
+      if (activity.action === 'USER_LOGIN') {
+        const ip = activity.ipAddress ? `IP ${activity.ipAddress}` : '';
+        const agent = activity.userAgent ? `Device ${activity.userAgent}` : '';
+        return ['Login', ip, agent].filter(Boolean).join(' • ');
+      }
+      if (activity.action === 'USER_LOGOUT') {
+        return 'Logout';
+      }
+      if (details.role) return `Role: ${details.role}`;
+      if (details.name) return `Name: ${details.name}`;
+      if (details.email) return `Email: ${details.email}`;
+    }
+    
+    // Handle customer actions
+    if (activity.action.includes('CUSTOMER')) {
+      if (details.companyName) return `"${details.companyName}"`;
+      if (details.industry) return `Industry: ${details.industry}`;
+      if (details.location) return `Location: ${details.location}`;
+    }
+    
+    // Handle target actions
+    if (activity.action.includes('TARGET')) {
+      if (details.targetValue) return `Target: ₹${details.targetValue?.toLocaleString() || 0}`;
+      if (details.productType) return `Type: ${details.productType}`;
+    }
+    
+    return '';
+  };
+
+  const getActivityDescription = (activity: ActivityLog) => {
+    const baseAction = activity.action.replace(/_/g, ' ').toLowerCase();
+    const details = formatActivityDetails(activity);
+    
+    if (details) {
+      return `${baseAction} • ${details}`;
+    }
+    
+    return baseAction;
+  };
+
+  const formatTimeAgo = (date: string) => {
+    const now = new Date();
+    const then = new Date(date);
+    const diffMs = now.getTime() - then.getTime();
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    
+    if (diffHours < 1) return 'Just now';
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays}d ago`;
+  };
+
+  const getActionColor = (action: string) => {
+    const a = (action || '').toUpperCase().trim();
+    console.log('Color for action:', a); // Debug log
+    
+    // New vibrant color palette
+    if (a === 'USER_LOGIN') return 'bg-rose-100 text-rose-800 border-rose-200';
+    if (a === 'USER_LOGOUT') return 'bg-amber-100 text-amber-800 border-amber-200';
+    if (a === 'OFFER_CREATED') return 'bg-cyan-100 text-cyan-800 border-cyan-200';
+    if (a === 'OFFER_UPDATED') return 'bg-violet-100 text-violet-800 border-violet-200';
+    if (a === 'OFFER_DELETED') return 'bg-red-100 text-red-800 border-red-200';
+    if (a === 'OFFER_STATUS_UPDATED') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+    if (a === 'OFFER_NOTE_ADDED') return 'bg-indigo-100 text-indigo-800 border-indigo-200';
+    if (a === 'USER_CREATED') return 'bg-teal-100 text-teal-800 border-teal-200';
+    if (a === 'USER_UPDATED') return 'bg-sky-100 text-sky-800 border-sky-200';
+    if (a === 'USER_DELETED') return 'bg-pink-100 text-pink-800 border-pink-200';
+    if (a === 'CUSTOMER_CREATED') return 'bg-orange-100 text-orange-800 border-orange-200';
+    if (a === 'CUSTOMER_UPDATED') return 'bg-lime-100 text-lime-800 border-lime-200';
+    if (a === 'CUSTOMER_DELETED') return 'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200';
+    if (a === 'TARGET_CREATED') return 'bg-purple-100 text-purple-800 border-purple-200';
+    if (a === 'TARGET_UPDATED') return 'bg-blue-100 text-blue-800 border-blue-200';
+    if (a === 'TARGET_DELETED') return 'bg-slate-100 text-slate-800 border-slate-200';
+    
+    // Pattern matching with new colors
+    if (a.includes('LOGIN')) return 'bg-rose-100 text-rose-800 border-rose-200';
+    if (a.includes('LOGOUT')) return 'bg-amber-100 text-amber-800 border-amber-200';
+    if (a.includes('CREATED')) return 'bg-cyan-100 text-cyan-800 border-cyan-200';
+    if (a.includes('UPDATED')) return 'bg-violet-100 text-violet-800 border-violet-200';
+    if (a.includes('DELETED')) return 'bg-red-100 text-red-800 border-red-200';
+    if (a.includes('STATUS')) return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+    if (a.includes('NOTE')) return 'bg-indigo-100 text-indigo-800 border-indigo-200';
+    if (a.includes('FAILED')) return 'bg-red-100 text-red-800 border-red-200';
+    if (a.includes('EXPORT') || a.includes('DOWNLOAD')) return 'bg-sky-100 text-sky-800 border-sky-200';
+    if (a.includes('SECURITY') || a.includes('ALERT') || a.includes('SUSPICIOUS')) return 'bg-orange-100 text-orange-800 border-orange-200';
+    if (a.includes('COMPLIANCE') || a.includes('AUDIT')) return 'bg-teal-100 text-teal-800 border-teal-200';
+    
+    // Default fallback
+    console.log('Using default color for:', a);
+    return 'bg-purple-100 text-purple-800 border-purple-200';
+  };
+
+  const getActivityColor = (action: string) => {
+    const a = (action || '').toUpperCase().trim();
+    
+    // New vibrant hex colors
+    if (a === 'USER_LOGIN') return '#f43f5e'; // rose-500
+    if (a === 'USER_LOGOUT') return '#f59e0b'; // amber-500
+    if (a === 'OFFER_CREATED') return '#06b6d4'; // cyan-500
+    if (a === 'OFFER_UPDATED') return '#8b5cf6'; // violet-500
+    if (a === 'OFFER_DELETED') return '#ef4444'; // red-500
+    if (a === 'OFFER_STATUS_UPDATED') return '#10b981'; // emerald-500
+    if (a === 'OFFER_NOTE_ADDED') return '#6366f1'; // indigo-500
+    if (a === 'USER_CREATED') return '#14b8a6'; // teal-500
+    if (a === 'USER_UPDATED') return '#0ea5e9'; // sky-500
+    if (a === 'USER_DELETED') return '#ec4899'; // pink-500
+    if (a === 'CUSTOMER_CREATED') return '#f97316'; // orange-500
+    if (a === 'CUSTOMER_UPDATED') return '#84cc16'; // lime-500
+    if (a === 'CUSTOMER_DELETED') return '#d946ef'; // fuchsia-500
+    if (a === 'TARGET_CREATED') return '#a855f7'; // purple-500
+    if (a === 'TARGET_UPDATED') return '#3b82f6'; // blue-500
+    if (a === 'TARGET_DELETED') return '#64748b'; // slate-500
+    
+    // Pattern matching with new colors
+    if (a.includes('LOGIN')) return '#f43f5e';
+    if (a.includes('LOGOUT')) return '#f59e0b';
+    if (a.includes('CREATED')) return '#06b6d4';
+    if (a.includes('UPDATED')) return '#8b5cf6';
+    if (a.includes('DELETED')) return '#ef4444';
+    if (a.includes('STATUS')) return '#10b981';
+    if (a.includes('NOTE')) return '#6366f1';
+    if (a.includes('FAILED')) return '#ef4444';
+    
+    // Default
+    return '#a855f7'; // purple
+  };
+
+  const getEntityIcon = (entityType: string) => {
+    switch (entityType.toLowerCase()) {
+      case 'offer': return <Package className="h-4 w-4" />;
+      case 'user': return <Users className="h-4 w-4" />;
+      case 'customer': return <Building className="h-4 w-4" />;
+      case 'target': return <Target className="h-4 w-4" />;
+      default: return <FileText className="h-4 w-4" />;
+    }
+  };
+
+  if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-violet-600 mx-auto mb-4" />
-          <p className="text-slate-600 font-medium">Loading activity logs...</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
         </div>
       </div>
-    )
-  }
-
-  if (error && !activityData) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <XCircle className="h-12 w-12 text-red-600 mx-auto mb-4" />
-          <p className="text-slate-600 font-medium">{error}</p>
-          <Button onClick={refreshLogs} className="mt-4">Retry</Button>
-        </div>
-      </div>
-    )
-  }
-
-  const activities = viewMode === 'realtime' ? realtimeActivities : (activityData?.activities || [])
-  const stats = activityData?.stats || { 
-    total: 0, 
-    todayCount: 0, 
-    yesterdayCount: 0, 
-    weekCount: 0, 
-    monthCount: 0, 
-    todayVsYesterday: 0,
-    uniqueUsersCount: 0, 
-    actionCounts: {},
-    entityTypeStats: {}
+    );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Activity Logs</h1>
-          <p className="text-gray-600">Track all system activities and user actions</p>
-        </div>
-        <div className="flex gap-3">
-          {/* View Mode Selector */}
-          <Select value={viewMode} onValueChange={setViewMode}>
-            <SelectTrigger className="w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {viewModes.map(mode => (
-                <SelectItem key={mode.value} value={mode.value}>{mode.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          
-          {/* Real-time Toggle */}
-          {viewMode === 'realtime' && (
-            <Button 
-              variant={autoRefresh ? "default" : "outline"} 
-              onClick={() => setAutoRefresh(!autoRefresh)}
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold text-slate-900">Activity Monitor</h1>
+            <p className="text-slate-600 mt-2">Real-time system activity and analytics</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Select value={timeframe} onValueChange={setTimeframe}>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">Last 1 day</SelectItem>
+                <SelectItem value="7">Last 7 days</SelectItem>
+                <SelectItem value="30">Last 30 days</SelectItem>
+                <SelectItem value="90">Last 90 days</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setActivities([]); // Clear existing activities
+                setPage(1);
+                setRenderKey(prev => prev + 1); // Force re-render
+                fetchActivities(1, true);
+              }}
             >
-              <Activity className={`h-4 w-4 mr-2 ${autoRefresh ? 'animate-pulse' : ''}`} />
-              {autoRefresh ? 'Live' : 'Paused'}
-            </Button>
-          )}
-
-          <Button variant="outline" onClick={refreshLogs} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-          <Button onClick={handleExport} className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white">
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
-        </div>
-      </div>
-
-      {/* Advanced Filters */}
-      {viewMode !== 'realtime' && (
-        <Card className="border-l-4 border-l-blue-500">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2">
-                <Filter className="h-5 w-5 text-blue-600" />
-                Advanced Filters
-              </CardTitle>
-              <Select value={timeframe} onValueChange={setTimeframe}>
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {timeframeOptions.map(option => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </CardHeader>
-          <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Search */}
-            <div className="space-y-2">
-              <Label htmlFor="search">Search</Label>
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
-                <Input
-                  id="search"
-                  placeholder="Search logs..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-8"
-                />
-              </div>
-            </div>
-
-            {/* Action Filter */}
-            <div className="space-y-2">
-              <Label>Action Type</Label>
-              <Select value={selectedAction} onValueChange={setSelectedAction}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {actionTypes.map(action => (
-                    <SelectItem key={action} value={action}>{action}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* User Filter */}
-            <div className="space-y-2">
-              <Label>User</Label>
-              <Select value={selectedUser} onValueChange={setSelectedUser}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {uniqueUsers.map(userId => (
-                    <SelectItem key={userId} value={userId}>{getUserName(userId)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Date Range */}
-            <div className="space-y-2">
-              <Label>From Date</Label>
-              <Input
-                type="datetime-local"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>To Date</Label>
-              <Input
-                type="datetime-local"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-between items-center mt-4">
-            <Button variant="outline" onClick={clearFilters}>
               <RefreshCw className="h-4 w-4 mr-2" />
-              Clear Filters
+              Refresh
             </Button>
-            <p className="text-sm text-gray-600">
-              Showing {activities.length} of {stats.total} logs
-            </p>
           </div>
-        </CardContent>
-      </Card>
-      )}
-
-      {/* Activity Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="overflow-hidden border-0 shadow-lg bg-gradient-to-br from-blue-50 to-blue-100">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-blue-600 rounded-xl">
-                <Activity className="h-6 w-6 text-white" />
-              </div>
-              {stats.todayVsYesterday !== undefined && (
-                <div className={`flex items-center gap-1 text-sm font-semibold ${stats.todayVsYesterday >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {stats.todayVsYesterday >= 0 ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
-                  {Math.abs(stats.todayVsYesterday).toFixed(1)}%
-                </div>
-              )}
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-slate-600">Total Activities</p>
-              <h3 className="text-3xl font-bold text-slate-900">{stats.total.toLocaleString()}</h3>
-              <p className="text-xs text-slate-500">All time</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="overflow-hidden border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-green-600 rounded-xl">
-                <Clock className="h-6 w-6 text-white" />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-slate-600">Today's Activity</p>
-              <h3 className="text-3xl font-bold text-slate-900">{stats.todayCount}</h3>
-              <p className="text-xs text-slate-500">vs {stats.yesterdayCount || 0} yesterday</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="overflow-hidden border-0 shadow-lg bg-gradient-to-br from-purple-50 to-purple-100">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-purple-600 rounded-xl">
-                <FileText className="h-6 w-6 text-white" />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-slate-600">Offer Actions</p>
-              <h3 className="text-3xl font-bold text-slate-900">
-                {(stats.actionCounts['OFFER_CREATED'] || 0) + (stats.actionCounts['OFFER_UPDATED'] || 0)}
-              </h3>
-              <p className="text-xs text-slate-500">Created + Updated</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="overflow-hidden border-0 shadow-lg bg-gradient-to-br from-amber-50 to-amber-100">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-amber-600 rounded-xl">
-                <Users className="h-6 w-6 text-white" />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-slate-600">Active Users</p>
-              <h3 className="text-3xl font-bold text-slate-900">{stats.uniqueUsersCount}</h3>
-              <p className="text-xs text-slate-500">This period</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Modern Activity Timeline */}
-      {viewMode === 'timeline' && (
-        <Card className="border-l-4 border-l-indigo-500">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2">
-                <Timer className="h-5 w-5 text-indigo-600" />
-                Activity Timeline
-              </CardTitle>
-              {activities.length > 0 && (
-                <span className="text-sm text-slate-500">
-                  Last updated: {formatTimeAgo(activities[0].createdAt)}
-                </span>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="space-y-1">
-              {activities.map((log) => (
-              <div key={log.id} className="p-4 border-b border-gray-100 hover:bg-gray-50">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-3 flex-1">
-                    {/* Icon and Severity */}
-                    <div className="flex items-center gap-2">
-                      <div className={`p-2 rounded-full ${getSeverityColor(log.action).replace('text-', 'bg-').replace('bg-', 'bg-opacity-20 text-')}`}>
-                        {getActionIcon(log.action)}
-                      </div>
-                      <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border ${getSeverityColor(log.action)}`}>
-                        {getSeverityIcon(log.action)}
-                        {getSeverity(log.action).toUpperCase()}
-                      </div>
-                    </div>
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <p className="text-sm font-medium text-gray-900">{getActionDescription(log)}</p>
-                      </div>
-                      
-                      <div className="flex items-center gap-4 text-xs text-gray-500">
-                        <span className="flex items-center gap-1">
-                          <User className="h-3 w-3" />
-                          {log.user?.name || log.user?.email || 'System'}
-                        </span>
-                        {log.entityType && (
-                          <span className="flex items-center gap-1">
-                            <Bell className="h-3 w-3" />
-                            {log.entityType}
-                          </span>
-                        )}
-                        {log.entityId && (
-                          <span className="flex items-center gap-1">
-                            <FileText className="h-3 w-3" />
-                            {log.entityId}
-                          </span>
-                        )}
-                        {log.ipAddress && <span>{log.ipAddress}</span>}
-                      </div>
-
-                      {/* Additional Details */}
-                      {log.details && Object.keys(log.details).length > 0 && (
-                        <div className="mt-2 p-2 bg-gray-50 rounded text-xs">
-                          <details>
-                            <summary className="cursor-pointer text-gray-600 hover:text-gray-900">
-                              View Details
-                            </summary>
-                            <div className="mt-1 space-y-1">
-                              {Object.entries(log.details).map(([key, value]) => (
-                                <div key={key} className="flex justify-between">
-                                  <span className="font-medium text-gray-600">{key}:</span>
-                                  <span className="text-gray-900">
-                                    {Array.isArray(value) ? value.join(', ') : String(value)}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </details>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Timestamp */}
-                  <div className="text-xs text-gray-500 whitespace-nowrap ml-4">
-                    {formatTimestamp(log.createdAt)}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-            {activities.length === 0 && (
-              <div className="p-8 text-center">
-                <Bell className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500">No activity logs found matching your filters.</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Analytics View */}
-      {viewMode === 'analytics' && activityStats && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Daily Trend Chart */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Activity Trend</CardTitle>
-              <CardDescription>Daily activity over time</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <AreaChart data={activityStats.dailyTrend}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Area type="monotone" dataKey="count" stroke="#8884d8" fill="#8884d8" fillOpacity={0.6} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          {/* Peak Hours Chart */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Peak Activity Hours</CardTitle>
-              <CardDescription>Activity distribution by hour</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={activityStats.peakHours}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="hour" />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="count" fill="#82ca9d" />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
         </div>
-      )}
 
-      {/* Real-time View */}
-      {viewMode === 'realtime' && (
-        <Card className="border-l-4 border-l-green-500">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2">
-                <Monitor className="h-5 w-5 text-green-600" />
-                Real-time Activity Monitor
-                {autoRefresh && <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse ml-2" />}
-              </CardTitle>
-              <div className="text-sm text-slate-500">
-                {realtimeActivities.length} recent activities
+        {/* Filters Section */}
+        <Card className="shadow-lg border-0 bg-white">
+          <CardContent className="p-6">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-slate-600" />
+                <span className="text-sm font-medium text-slate-700">Filter by User:</span>
               </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {realtimeActivities.map((log) => (
-                <div key={log.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border-l-4 border-l-blue-400">
-                  <div className={`p-2 rounded-full ${getSeverityColor(log.action)}`}>
-                    {getActionIcon(log.action)}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm">{getActionDescription(log)}</span>
-                      {log.user?.role && (
-                        <span className={`text-xs px-2 py-1 rounded-full font-semibold ${getRoleColor(log.user.role)}`}>
-                          {log.user.role}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      {log.user?.name || log.user?.email || 'System'} • {formatTimeAgo(log.createdAt)}
-                    </div>
-                  </div>
-                </div>
-              ))}
+              <Select value={selectedUser} onValueChange={setSelectedUser}>
+                <SelectTrigger className="w-48">
+                  <SelectValue placeholder="Select user" />
+                </SelectTrigger>
+                <SelectContent className="max-h-60 overflow-y-auto">
+                  <SelectItem value="all">All Users</SelectItem>
+                  {Array.isArray(users) && users.map((user) => (
+                    <SelectItem key={user.id} value={user.id.toString()}>
+                      {user.name} ({user.role})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="flex items-center gap-2 ml-6">
+                <Activity className="h-4 w-4 text-slate-600" />
+                <span className="text-sm font-medium text-slate-700">Filter by Activity:</span>
+              </div>
+              <Select value={selectedAction} onValueChange={setSelectedAction}>
+                <SelectTrigger className="w-48">
+                  <SelectValue placeholder="Select activity" />
+                </SelectTrigger>
+                <SelectContent className="max-h-60 overflow-y-auto">
+                  <SelectItem value="all">All Activities</SelectItem>
+                  <SelectItem value="OFFER_CREATED">Offer Created</SelectItem>
+                  <SelectItem value="OFFER_UPDATED">Offer Updated</SelectItem>
+                  <SelectItem value="OFFER_STATUS_UPDATED">Offer Status Changed</SelectItem>
+                  <SelectItem value="OFFER_DELETED">Offer Deleted</SelectItem>
+                  <SelectItem value="OFFER_NOTE_ADDED">Offer Note Added</SelectItem>
+                  <SelectItem value="CUSTOMER_CREATED">Customer Created</SelectItem>
+                  <SelectItem value="USER_LOGIN">User Login</SelectItem>
+                  <SelectItem value="USER_LOGOUT">User Logout</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <div className="flex-1"></div>
               
-              {realtimeActivities.length === 0 && (
-                <div className="text-center py-8">
-                  <Activity className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                  <p className="text-slate-500">No recent activity</p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {autoRefresh ? 'Monitoring for new activities...' : 'Click the Live button to start monitoring'}
-                  </p>
-                </div>
-              )}
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                <span className="font-medium">{activities.length}</span>
+                <span>activities found</span>
+              </div>
             </div>
           </CardContent>
         </Card>
-      )}
-    </div>
-  )
-}
 
+        {/* Main Content - Activity Feed Only */}
+        <div className="space-y-6">
+          <Card className="shadow-xl border-0">
+            <CardHeader className="bg-gradient-to-r from-green-500 to-green-600 text-white rounded-t-xl">
+              <CardTitle className="flex items-center gap-2">
+                <Clock className="h-5 w-5" />
+                Activity Feed
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="space-y-3">
+                {activities.map((activity) => (
+                    <div key={`${activity.id}-${renderKey}`} className="flex items-start justify-between p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
+                      <div className="flex items-start gap-4 flex-1">
+                        <div className="flex items-center justify-center w-10 h-10 bg-white rounded-full shadow-sm flex-shrink-0">
+                          {getEntityIcon(activity.entityType)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="font-medium">{activity.user.name}</span>
+                            <Badge 
+                              className={getActionColor(activity.action)}
+                              style={{
+                                // Fallback inline styles if Tailwind classes don't work
+                                backgroundColor: getActivityColor(activity.action),
+                                color: 'white',
+                                border: `2px solid ${getActivityColor(activity.action)}`,
+                              }}
+                            >
+                              {activity.action.replace(/_/g, ' ')}
+                            </Badge>
+                            <span className="text-sm text-slate-600 capitalize">
+                              {activity.entityType}
+                            </span>
+                          </div>
+                          <div className="text-sm text-slate-700 mb-1">
+                            {getActivityDescription(activity)}
+                          </div>
+                          <p className="text-xs text-slate-500">
+                            {activity.user.email} • {formatTimeAgo(activity.createdAt)}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 transition-colors"
+                        onClick={() => setSelectedActivity(activity)}
+                        title="View details"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                        View more
+                      </button>
+                    </div>
+                  ))}
+                  {activities.length === 0 && (
+                    <div className="text-center py-16 text-slate-500">No activities in this period.</div>
+                  )}
+                </div>
+                {/* Enhanced Activity Detail Modal */}
+                {selectedActivity && (
+                  <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+                      {/* Header with gradient background */}
+                      <div className="bg-gradient-to-r from-blue-600 to-violet-600 text-white p-6">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-start gap-4">
+                            <div className="flex items-center justify-center w-14 h-14 bg-white/20 backdrop-blur rounded-xl">
+                              {getEntityIcon(selectedActivity.entityType)}
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <span className="text-lg font-semibold">{selectedActivity.user.name}</span>
+                                <Badge 
+                                  className="bg-white/20 text-white border-white/30 hover:bg-white/30"
+                                >
+                                  {selectedActivity.action.replace(/_/g, ' ')}
+                                </Badge>
+                                <Badge 
+                                  className="bg-white/10 text-white border-white/20"
+                                >
+                                  {selectedActivity.entityType}
+                                </Badge>
+                              </div>
+                              <p className="text-white/90 mb-1">
+                                {getActivityDescription(selectedActivity)}
+                              </p>
+                              <p className="text-white/70 text-sm">
+                                {selectedActivity.user.email} • {new Date(selectedActivity.createdAt).toLocaleString()}
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            className="text-white/70 hover:text-white transition-colors"
+                            onClick={() => setSelectedActivity(null)}
+                          >
+                            <X className="h-6 w-6" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Content */}
+                      <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
+                        {/* Key Information Cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4 border border-blue-200">
+                            <div className="flex items-center gap-2 mb-2">
+                              <User className="h-5 w-5 text-blue-600" />
+                              <span className="font-medium text-blue-900">User Information</span>
+                            </div>
+                            <div className="space-y-1 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-blue-700">Name:</span>
+                                <span className="font-medium text-blue-900">{selectedActivity.user.name}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-blue-700">Role:</span>
+                                <span className="font-medium text-blue-900 capitalize">{selectedActivity.user.role}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-blue-700">Email:</span>
+                                <span className="font-medium text-blue-900 text-xs">{selectedActivity.user.email}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-xl p-4 border border-emerald-200">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Activity className="h-5 w-5 text-emerald-600" />
+                              <span className="font-medium text-emerald-900">Activity Details</span>
+                            </div>
+                            <div className="space-y-1 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-emerald-700">Action:</span>
+                                <span className="font-medium text-emerald-900 capitalize">{selectedActivity.action.replace(/_/g, ' ')}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-emerald-700">Entity:</span>
+                                <span className="font-medium text-emerald-900 capitalize">{selectedActivity.entityType}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-emerald-700">Entity ID:</span>
+                                <span className="font-medium text-emerald-900">{selectedActivity.entityId || 'N/A'}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="bg-gradient-to-br from-violet-50 to-violet-100 rounded-xl p-4 border border-violet-200">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Clock className="h-5 w-5 text-violet-600" />
+                              <span className="font-medium text-violet-900">Timestamp</span>
+                            </div>
+                            <div className="space-y-1 text-sm">
+                              <div className="flex justify-between">
+                                <span className="text-violet-700">Date:</span>
+                                <span className="font-medium text-violet-900">{new Date(selectedActivity.createdAt).toLocaleDateString()}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-violet-700">Time:</span>
+                                <span className="font-medium text-violet-900">{new Date(selectedActivity.createdAt).toLocaleTimeString()}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-violet-700">Relative:</span>
+                                <span className="font-medium text-violet-900">{formatTimeAgo(selectedActivity.createdAt)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Detailed Changes */}
+                        {selectedActivity.details && Object.keys(selectedActivity.details).length > 0 && (
+                          <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-6 border border-slate-200">
+                            <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                              <FileText className="h-5 w-5 text-slate-600" />
+                              Detailed Changes
+                            </h3>
+                            <div className="space-y-3">
+                              {selectedActivity.action === 'OFFER_UPDATED' && selectedActivity.details.changes ? (
+                                <div className="space-y-2">
+                                  {Object.entries(selectedActivity.details.changes).map(([field, change]: [string, any]) => (
+                                    <div key={field} className="bg-white rounded-lg p-3 border border-slate-200">
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-medium text-slate-700 capitalize">{field}:</span>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-red-600 line-through text-sm">{change.from || 'N/A'}</span>
+                                          <ArrowRight className="h-4 w-4 text-slate-400" />
+                                          <span className="text-green-600 font-medium">{change.to || 'N/A'}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="grid grid-cols-1 gap-2">
+                                  {Object.entries(selectedActivity.details).map(([key, value]) => (
+                                    <div key={key} className="bg-white rounded-lg p-3 border border-slate-200">
+                                      <div className="flex items-start justify-between">
+                                        <span className="font-medium text-slate-700 capitalize">{key}:</span>
+                                        <span className="text-slate-600 text-right max-w-md break-all">
+                                          {typeof value === 'object' ? (
+                                            <pre className="text-xs bg-slate-50 p-2 rounded border border-slate-100">
+                                              {JSON.stringify(value, null, 2)}
+                                            </pre>
+                                          ) : (
+                                            <span className="font-medium">{String(value)}</span>
+                                          )}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Footer */}
+                      <div className="bg-slate-50 px-6 py-4 border-t border-slate-200">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm text-slate-600">
+                            Activity logged on {new Date(selectedActivity.createdAt).toLocaleString()}
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSelectedActivity(null)}
+                          >
+                            Close
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {hasMore && (
+                  <div className="pt-4">
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        const next = page + 1;
+                        setPage(next);
+                        fetchActivities(next);
+                      }}
+                    >
+                      Load more
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+        </div>
+      </div>
+    </div>
+  );
+}

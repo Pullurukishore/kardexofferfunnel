@@ -40,7 +40,7 @@ interface Asset {
     companyName: string;
   };
   _count?: {
-    tickets?: number;
+    offers?: number;
   };
   createdAt: string;
   updatedAt: string;
@@ -79,7 +79,7 @@ export default function AssetDetailPage() {
       await apiService.deleteAsset(asset.id);
       
       toast.success(`Asset ${asset.machineId} has been deleted successfully`);
-      router.push(`/admin/customers/${asset.customer.id}`);
+      router.push(`/admin/assets?customerId=${asset.customer.id}`);
     } catch (error) {
       console.error('Error deleting asset:', error);
       toast.error('Failed to delete asset. Please try again.');
@@ -135,9 +135,9 @@ export default function AssetDetailPage() {
         <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
           <Button 
             variant="ghost" 
-            onClick={() => router.push(`/admin/customers/${asset.customer.id}`)} 
+            onClick={() => router.push(`/admin/assets?customerId=${asset.customer.id}`)} 
             className="p-2 flex-shrink-0"
-            title="Back to Customer"
+            title="Back to Assets"
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -343,8 +343,8 @@ export default function AssetDetailPage() {
                       <Clock className="h-5 w-5 text-green-600" />
                     </div>
                     <div>
-                      <span className="text-sm font-medium text-gray-900">Tickets</span>
-                      <p className="text-xs text-gray-600">{asset._count?.tickets || 0} total</p>
+                      <span className="text-sm font-medium text-gray-900">Offers</span>
+                      <p className="text-xs text-gray-600">{asset._count?.offers ?? 0} total</p>
                     </div>
                   </div>
                 </div>

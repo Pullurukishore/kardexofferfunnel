@@ -38,10 +38,11 @@ interface Customer {
 interface CustomerTableProps {
   customers: Customer[];
   readOnly?: boolean;
+  basePath?: string;
 }
 
 // Memoized customer row component
-const CustomerRow = memo(({ customer, readOnly }: { customer: Customer; readOnly?: boolean }) => {
+const CustomerRow = memo(({ customer, readOnly, basePath }: { customer: Customer; readOnly?: boolean; basePath?: string }) => {
   const primaryContact = useMemo(() => {
     return customer.contacts && customer.contacts.length > 0 ? customer.contacts[0] : null;
   }, [customer.contacts]);
@@ -59,7 +60,7 @@ const CustomerRow = memo(({ customer, readOnly }: { customer: Customer; readOnly
           </div>
           <div className="min-w-0 flex-1">
             <Link 
-              href={`/admin/customers/${customer.id}`}
+              href={`${basePath || '/admin/customers'}/${customer.id}`}
               className="font-medium text-gray-900 hover:text-blue-600 transition-colors block break-words leading-tight"
               style={{ wordBreak: 'break-word', hyphens: 'auto' }}
             >
@@ -122,7 +123,7 @@ const CustomerRow = memo(({ customer, readOnly }: { customer: Customer; readOnly
       <td className="py-3 px-4 text-right">
         <div className="flex items-center justify-end gap-1">
           <Link 
-            href={`/admin/customers/${customer.id}`}
+            href={`${basePath || '/admin/customers'}/${customer.id}`}
             className="inline-flex items-center justify-center h-8 w-8 rounded hover:bg-blue-50 transition-colors"
           >
             <Eye className="h-4 w-4 text-gray-600" />
@@ -144,7 +145,7 @@ const CustomerRow = memo(({ customer, readOnly }: { customer: Customer; readOnly
 CustomerRow.displayName = 'CustomerRow';
 
 // Mobile customer card component
-const CustomerMobileCard = memo(({ customer, readOnly }: { customer: Customer; readOnly?: boolean }) => {
+const CustomerMobileCard = memo(({ customer, readOnly, basePath }: { customer: Customer; readOnly?: boolean; basePath?: string }) => {
   const primaryContact = useMemo(() => {
     return customer.contacts && customer.contacts.length > 0 ? customer.contacts[0] : null;
   }, [customer.contacts]);
@@ -164,7 +165,7 @@ const CustomerMobileCard = memo(({ customer, readOnly }: { customer: Customer; r
             </div>
             <div className="min-w-0 flex-1">
               <Link 
-                href={`/admin/customers/${customer.id}`}
+                href={`${basePath || '/admin/customers'}/${customer.id}`}
                 className="font-semibold text-lg text-gray-900 hover:text-blue-600 transition-colors block leading-tight"
               >
                 {customer.companyName}
@@ -178,7 +179,7 @@ const CustomerMobileCard = memo(({ customer, readOnly }: { customer: Customer; r
             </div>
             <div className="flex items-center gap-1">
               <Link 
-                href={`/admin/customers/${customer.id}`}
+                href={`${basePath || '/admin/customers'}/${customer.id}`}
                 className="inline-flex items-center justify-center h-9 w-9 rounded-lg hover:bg-blue-50 transition-colors"
               >
                 <Eye className="h-4 w-4 text-gray-600" />
@@ -252,7 +253,7 @@ const CustomerMobileCard = memo(({ customer, readOnly }: { customer: Customer; r
 
 CustomerMobileCard.displayName = 'CustomerMobileCard';
 
-const CustomerTable = memo(function CustomerTable({ customers, readOnly = false }: CustomerTableProps) {
+const CustomerTable = memo(function CustomerTable({ customers, readOnly = false, basePath }: CustomerTableProps) {
   const customerCount = useMemo(() => customers.length, [customers.length]);
 
   if (!customerCount) {
@@ -344,7 +345,7 @@ const CustomerTable = memo(function CustomerTable({ customers, readOnly = false 
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {customers.map((customer) => (
-                  <CustomerRow key={customer.id} customer={customer} readOnly={readOnly} />
+                  <CustomerRow key={customer.id} customer={customer} readOnly={readOnly} basePath={basePath} />
                 ))}
               </tbody>
             </table>
@@ -362,7 +363,7 @@ const CustomerTable = memo(function CustomerTable({ customers, readOnly = false 
         </div>
         <div className="space-y-4">
           {customers.map((customer) => (
-            <CustomerMobileCard key={customer.id} customer={customer} readOnly={readOnly} />
+            <CustomerMobileCard key={customer.id} customer={customer} readOnly={readOnly} basePath={basePath} />
           ))}
         </div>
       </div>

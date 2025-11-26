@@ -4,7 +4,7 @@ import { app } from './app';
 import { prisma } from './lib/prisma';
 import { logger } from './utils/logger';
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 5001;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 5002;
 
 const server = createServer(app);
 

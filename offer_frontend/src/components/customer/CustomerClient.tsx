@@ -40,13 +40,15 @@ interface CustomerClientProps {
     page?: string;
   };
   readOnly?: boolean;
+  viewBasePath?: string;
 }
 
 const CustomerClient = memo(function CustomerClient({
   initialCustomers,
   initialStats,
   searchParams,
-  readOnly = false
+  readOnly = false,
+  viewBasePath
 }: CustomerClientProps) {
   const [customers, setCustomers] = useState<Customer[]>(initialCustomers);
   const [stats, setStats] = useState(initialStats);
@@ -211,6 +213,7 @@ const CustomerClient = memo(function CustomerClient({
       <CustomerTable 
         customers={customers}
         readOnly={readOnly}
+        basePath={viewBasePath}
       />
     </div>
   );

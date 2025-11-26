@@ -36,4 +36,7 @@ router.delete('/:userId', UserController.deleteUser);
 // Bulk update user status
 router.post('/bulk/status', UserController.bulkUpdateStatus);
 
+// Change user password
+router.post('/:userId/change-password', UserController.changePassword);
+
 export default router;

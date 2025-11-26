@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -48,26 +48,36 @@ import {
   DollarSign,
   Calendar,
   Sparkles,
-  Home
+  Home,
+  Percent
 } from 'lucide-react'
 import { apiService } from '@/services/api'
 import { toast } from 'sonner'
 
 const stages = ['All Stage', 'INITIAL', 'PROPOSAL_SENT', 'NEGOTIATION', 'FINAL_APPROVAL', 'PO_RECEIVED', 'ORDER_BOOKED', 'WON', 'LOST']
+const productTypes = ['All Product Types', 'RELOCATION', 'CONTRACT', 'SPP', 'UPGRADE_KIT', 'SOFTWARE', 'BD_CHARGES', 'BD_SPARE', 'MIDLIFE_UPGRADE', 'RETROFIT_KIT']
 
 export default function ZoneUserOffers() {
   const router = useRouter()
   const [offers, setOffers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, pages: 0 })
+  const [pagination, setPagination] = useState({ page: 1, limit: 100, total: 0, pages: 0 })
 
   // Filter states
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedStage, setSelectedStage] = useState('All Stage')
+  const [selectedProductType, setSelectedProductType] = useState('All Product Types')
+  const [sortField, setSortField] = useState<string>('')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
 
+  // Debounce search to prevent excessive API calls
   useEffect(() => {
-    fetchOffers()
-  }, [searchTerm, selectedStage, pagination.page])
+    const timeoutId = setTimeout(() => {
+      fetchOffers()
+    }, searchTerm ? 500 : 0) // 500ms delay for search, immediate for other filters
+
+    return () => clearTimeout(timeoutId)
+  }, [searchTerm, selectedStage, selectedProductType, pagination.page])
 
   const fetchOffers = async () => {
     setLoading(true)
@@ -80,10 +90,11 @@ export default function ZoneUserOffers() {
       
       if (searchTerm) params.search = searchTerm
       if (selectedStage !== 'All Stage') params.stage = selectedStage
+      if (selectedProductType !== 'All Product Types') params.productType = selectedProductType
 
       const response = await apiService.getOffers(params)
       setOffers(response.offers || [])
-      setPagination(response.pagination || { page: 1, limit: 20, total: 0, pages: 0 })
+      setPagination(response.pagination || { page: 1, limit: 100, total: 0, pages: 0 })
     } catch (error: any) {
       console.error('Failed to fetch offers:', error)
       toast.error(error.response?.data?.error || 'Failed to fetch offers')
@@ -110,10 +121,43 @@ export default function ZoneUserOffers() {
   const clearFilters = () => {
     setSearchTerm('')
     setSelectedStage('All Stage')
+    setSelectedProductType('All Product Types')
     setPagination(prev => ({ ...prev, page: 1 }))
   }
 
-  const hasActiveFilters = searchTerm || selectedStage !== 'All Stage'
+  const hasActiveFilters = searchTerm || selectedStage !== 'All Stage' || selectedProductType !== 'All Product Types'
+
+  // Sort offers
+  const sortedOffers = useMemo(() => {
+    if (!sortField) return offers
+    
+    return [...offers].sort((a, b) => {
+      let aValue = a[sortField]
+      let bValue = b[sortField]
+      
+      // Handle nested properties
+      if (sortField === 'customer') {
+        aValue = a.customer?.companyName || a.company || ''
+        bValue = b.customer?.companyName || b.company || ''
+      } else if (sortField === 'offerValue') {
+        aValue = Number(a.offerValue || 0)
+        bValue = Number(b.offerValue || 0)
+      }
+      
+      if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1
+      if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1
+      return 0
+    })
+  }, [offers, sortField, sortDirection])
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDirection('asc')
+    }
+  }
 
   // Calculate statistics
   const stats = {
@@ -122,129 +166,74 @@ export default function ZoneUserOffers() {
     won: offers.filter(o => o.stage === 'WON').length,
     lost: offers.filter(o => o.stage === 'LOST').length,
     totalValue: offers.reduce((sum, o) => sum + (Number(o.offerValue) || 0), 0),
+    avgValue: offers.length > 0 ? offers.reduce((sum, o) => sum + (Number(o.offerValue) || 0), 0) / offers.filter(o => o.offerValue).length : 0,
+    conversionRate: pagination.total > 0 ? ((offers.filter(o => o.stage === 'WON').length / pagination.total) * 100) : 0
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-purple-50/20">
-      <div className="max-w-[1800px] mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
-        {/* Header */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 rounded-3xl shadow-2xl p-8 text-white">
-          <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
-          <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-500/20 rounded-full blur-2xl translate-y-1/2 -translate-x-1/2"></div>
-          <div className="relative z-10 flex justify-between items-start">
-            <div className="space-y-2">
-              <div className="flex items-center gap-4">
-                <div className="p-4 bg-white/20 backdrop-blur-sm rounded-2xl ring-2 ring-white/30 shadow-lg">
-                  <Sparkles className="h-10 w-10" />
-                </div>
-                <div>
-                  <h1 className="text-4xl font-bold tracking-tight">My Offers</h1>
-                  <p className="text-blue-100 mt-2 text-lg">Manage your personal offers</p>
-                </div>
+    <div className="min-h-screen bg-slate-50">
+      <div className="w-full p-4 sm:p-6 lg:p-8 space-y-6">
+        {/* Compact Header with Stats */}
+        <div className="relative overflow-hidden bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 rounded-2xl shadow-xl p-6 text-white">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
+          <div className="relative z-10 flex justify-between items-center">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-white/20 backdrop-blur-sm rounded-xl ring-2 ring-white/30">
+                <Sparkles className="h-8 w-8" />
               </div>
-              <div className="grid grid-cols-2 gap-4 mt-6">
-                <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/20">
-                  <p className="text-blue-100 text-sm font-medium">Total Value</p>
-                  <p className="text-3xl font-bold mt-1">{formatCurrency(stats.totalValue)}</p>
-                </div>
-                <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/20">
-                  <p className="text-blue-100 text-sm font-medium">Active Offers</p>
-                  <p className="text-3xl font-bold mt-1">{stats.active}</p>
-                </div>
+              <div>
+                <h1 className="text-3xl font-bold">My Offers</h1>
+                <p className="text-blue-100 mt-1">Track and manage your personal offers</p>
               </div>
             </div>
-            <div className="flex gap-3">
-              <Button onClick={handleExport} variant="secondary" className="bg-white/20 hover:bg-white/30 text-white border-white/30 backdrop-blur-sm hover:shadow-xl transition-all">
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
-              <Button onClick={() => router.push('/zone-user/offers/new')} className="bg-white text-blue-700 hover:bg-blue-50 shadow-xl hover:shadow-2xl transition-all hover:scale-105">
+            <div className="flex items-center gap-4">
+              <div className="grid grid-cols-4 gap-3">
+                <div className="bg-white/10 backdrop-blur-md rounded-lg px-4 py-2 border border-white/20 text-center">
+                  <p className="text-blue-100 text-xs font-medium">Total</p>
+                  <p className="text-2xl font-bold">{stats.total}</p>
+                </div>
+                <div className="bg-white/10 backdrop-blur-md rounded-lg px-4 py-2 border border-white/20 text-center">
+                  <p className="text-blue-100 text-xs font-medium">Won</p>
+                  <p className="text-2xl font-bold">{stats.won}</p>
+                </div>
+                <div className="bg-white/10 backdrop-blur-md rounded-lg px-4 py-2 border border-white/20 text-center">
+                  <p className="text-blue-100 text-xs font-medium">Win Rate</p>
+                  <p className="text-2xl font-bold">{stats.conversionRate.toFixed(0)}%</p>
+                </div>
+                <div className="bg-white/10 backdrop-blur-md rounded-lg px-4 py-2 border border-white/20 text-center">
+                  <p className="text-blue-100 text-xs font-medium">Value</p>
+                  <p className="text-xl font-bold">{formatCurrency(stats.totalValue).replace('₹', '₹')}</p>
+                </div>
+              </div>
+              <Button onClick={() => router.push('/zone-user/offers/new')} className="bg-white text-blue-700 hover:bg-blue-50 shadow-lg hover:shadow-xl transition-all">
                 <Plus className="h-4 w-4 mr-2" />
-                Create New Offer
+                Create New
               </Button>
             </div>
           </div>
         </div>
 
-        {/* Quick Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-blue-600/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <CardTitle className="text-sm font-semibold text-slate-600">Total Offers</CardTitle>
-              <div className="h-10 w-10 rounded-xl bg-blue-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Target className="h-5 w-5 text-blue-600" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-slate-900">{stats.total}</div>
-              <p className="text-xs text-slate-500 mt-2">
-                <span className="text-blue-600 font-medium">{stats.active}</span> active offers
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-emerald-600/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <CardTitle className="text-sm font-semibold text-slate-600">Deals Won</CardTitle>
-              <div className="h-10 w-10 rounded-xl bg-emerald-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Award className="h-5 w-5 text-emerald-600" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-slate-900">{stats.won}</div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-br from-red-500/5 to-red-600/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <CardTitle className="text-sm font-semibold text-slate-600">Deals Lost</CardTitle>
-              <div className="h-10 w-10 rounded-xl bg-red-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <X className="h-5 w-5 text-red-600" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-slate-900">{stats.lost}</div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-amber-600/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <CardTitle className="text-sm font-semibold text-slate-600">Total Value</CardTitle>
-              <div className="h-10 w-10 rounded-xl bg-amber-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <BarChart3 className="h-5 w-5 text-amber-600" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-slate-900">{formatCurrency(stats.totalValue)}</div>
-            </CardContent>
-          </Card>
-        </div>
-
         {/* Filters */}
-        <Card className="border-0 shadow-lg hover:shadow-xl transition-shadow">
-          <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 border-b">
+        <Card className="border-0 shadow-lg bg-white" style={{backgroundColor: 'white'}}>
+          <CardHeader className="bg-white border-b border-slate-200" style={{backgroundColor: 'white'}}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Filter className="h-5 w-5 text-blue-600" />
+                <Filter className="h-5 w-5 text-indigo-600" />
                 <CardTitle className="text-lg">Search & Filter</CardTitle>
                 {hasActiveFilters && (
                   <Badge variant="secondary" className="ml-2">Active</Badge>
                 )}
               </div>
               {hasActiveFilters && (
-                <Button variant="ghost" size="sm" onClick={clearFilters} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50">
+                <Button variant="ghost" size="sm" onClick={clearFilters} className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50">
                   <X className="h-4 w-4 mr-1" />
                   Clear All
                 </Button>
               )}
             </div>
           </CardHeader>
-          <CardContent className="pt-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <CardContent className="pt-6 bg-white" style={{backgroundColor: 'white'}}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Search */}
               <div className="space-y-2">
                 <Label htmlFor="search" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
@@ -258,7 +247,8 @@ export default function ZoneUserOffers() {
                     placeholder="Search by offer #, customer..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 h-11 border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                    disabled={loading}
+                    className="pl-10 h-11 border-gray-200 focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -266,16 +256,34 @@ export default function ZoneUserOffers() {
               {/* Stage Filter */}
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-blue-600" />
+                  <TrendingUp className="h-4 w-4 text-purple-600" />
                   Stage
                 </Label>
-                <Select value={selectedStage} onValueChange={setSelectedStage}>
-                  <SelectTrigger className="h-11 border-gray-200 focus:border-blue-500 focus:ring-blue-500">
+                <Select value={selectedStage} onValueChange={setSelectedStage} disabled={loading}>
+                  <SelectTrigger className="h-11 border-gray-200 focus:border-purple-500 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-[300px] overflow-y-auto">
                     {stages.map(stage => (
                       <SelectItem key={stage} value={stage}>{stage.replace(/_/g, ' ')}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Product Type Filter */}
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <Package className="h-4 w-4 text-pink-600" />
+                  Product Type
+                </Label>
+                <Select value={selectedProductType} onValueChange={setSelectedProductType} disabled={loading}>
+                  <SelectTrigger className="h-11 border-gray-200 focus:border-pink-500 focus:ring-pink-500 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[300px] overflow-y-auto">
+                    {productTypes.map(type => (
+                      <SelectItem key={type} value={type}>{type === 'All Product Types' ? type : type.replace(/_/g, ' ')}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -285,58 +293,63 @@ export default function ZoneUserOffers() {
         </Card>
 
         {/* Offers Table */}
-        <Card className="border-0 shadow-xl overflow-hidden">
-          <CardHeader className="bg-gradient-to-r from-slate-50 via-blue-50 to-purple-50/30 border-b">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-xl font-bold text-slate-900">My Offers</CardTitle>
-                <CardDescription className="text-slate-600 mt-1">
-                  {!loading && offers.length > 0 ? `Showing ${offers.length} of ${pagination.total} offers` : 'Manage your personal offers'}
-                </CardDescription>
-              </div>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={fetchOffers}
-                className="gap-2 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 transition-all"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Refresh
-              </Button>
-            </div>
-          </CardHeader>
+        <Card className="border-0 shadow-2xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gradient-to-r from-slate-100 via-blue-50 to-purple-50/50 border-b-2 border-slate-200">
+              <thead className="bg-gradient-to-r from-slate-100 via-blue-50 to-purple-50/50 border-b-2 border-slate-200 sticky top-0 z-10">
                 <tr>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
-                    Offer #
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('offerReferenceNumber')}>
+                    <div className="flex items-center gap-2">
+                      Offer #
+                      {sortField === 'offerReferenceNumber' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('customer')}>
                     <div className="flex items-center gap-2">
                       <Building2 className="h-4 w-4" />
                       Customer
+                      {sortField === 'customer' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('productType')}>
                     <div className="flex items-center gap-2">
                       <Package className="h-4 w-4" />
                       Product Type
+                      {sortField === 'productType' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('offerValue')}>
                     <div className="flex items-center gap-2">
                       <IndianRupee className="h-4 w-4" />
                       Value
+                      {sortField === 'offerValue' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('stage')}>
                     <div className="flex items-center gap-2">
                       <TrendingUp className="h-4 w-4" />
                       Stage
+                      {sortField === 'stage' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Date</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('createdAt')}>
+                    <div className="flex items-center gap-2">
+                      Date
+                      {sortField === 'createdAt' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
@@ -376,7 +389,7 @@ export default function ZoneUserOffers() {
                     </td>
                   </tr>
                 ) : (
-                  offers.map((offer: any) => (
+                  sortedOffers.map((offer: any) => (
                   <tr key={offer.id} className="border-b border-slate-100 hover:bg-gradient-to-r hover:from-blue-50/50 hover:via-indigo-50/30 hover:to-purple-50/20 transition-all duration-200 group">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
@@ -386,6 +399,11 @@ export default function ZoneUserOffers() {
                         >
                           {offer.offerReferenceNumber}
                         </button>
+                        {offer.stage === 'INITIAL' && (
+                          <Badge variant="secondary" className="bg-blue-100 text-blue-700 border-blue-200">
+                            Initial
+                          </Badge>
+                        )}
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -404,9 +422,15 @@ export default function ZoneUserOffers() {
                         offer.productType === 'SPP' ? 'bg-gradient-to-r from-orange-100 to-orange-50 text-orange-800 border-orange-300 shadow-sm' :
                         offer.productType === 'CONTRACT' ? 'bg-gradient-to-r from-emerald-100 to-emerald-50 text-emerald-800 border-emerald-300 shadow-sm' :
                         offer.productType === 'RELOCATION' ? 'bg-gradient-to-r from-blue-100 to-blue-50 text-blue-800 border-blue-300 shadow-sm' :
+                        offer.productType === 'UPGRADE_KIT' ? 'bg-gradient-to-r from-purple-100 to-purple-50 text-purple-800 border-purple-300 shadow-sm' :
+                        offer.productType === 'SOFTWARE' ? 'bg-gradient-to-r from-indigo-100 to-indigo-50 text-indigo-800 border-indigo-300 shadow-sm' :
+                        offer.productType === 'BD_CHARGES' ? 'bg-gradient-to-r from-amber-100 to-amber-50 text-amber-800 border-amber-300 shadow-sm' :
+                        offer.productType === 'BD_SPARE' ? 'bg-gradient-to-r from-rose-100 to-rose-50 text-rose-800 border-rose-300 shadow-sm' :
+                        offer.productType === 'MIDLIFE_UPGRADE' ? 'bg-gradient-to-r from-cyan-100 to-cyan-50 text-cyan-800 border-cyan-300 shadow-sm' :
+                        offer.productType === 'RETROFIT_KIT' ? 'bg-gradient-to-r from-teal-100 to-teal-50 text-teal-800 border-teal-300 shadow-sm' :
                         'bg-gradient-to-r from-gray-100 to-gray-50 text-gray-800 border-gray-300 shadow-sm'
                       } font-semibold px-3 py-1`}>
-                        {offer.productType}
+                        {offer.productType?.replace(/_/g, ' ')}
                       </Badge>
                     </td>
                     <td className="px-6 py-4">
@@ -418,7 +442,11 @@ export default function ZoneUserOffers() {
                           <span className="text-gray-900 font-bold text-lg">{formatCurrency(Number(offer.offerValue))}</span>
                         </div>
                       ) : (
-                        <Badge variant="outline" className="text-gray-500 border-dashed">TBD</Badge>
+                        offer.stage === 'INITIAL' ? (
+                          <Badge variant="outline" className="text-gray-500 border-dashed">TBD</Badge>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )
                       )}
                     </td>
                     <td className="px-6 py-4">
@@ -458,11 +486,17 @@ export default function ZoneUserOffers() {
                             View Details
                           </DropdownMenuItem>
                           <DropdownMenuItem 
-                            onClick={() => router.push(`/zone-user/offers/${offer.id}/edit`)}
+                            onClick={() => {
+                              if (offer.stage === 'INITIAL') {
+                                router.push(`/zone-user/offers/${offer.id}/edit`);
+                              } else {
+                                router.push(`/zone-user/offers/${offer.id}/edit`);
+                              }
+                            }}
                             className="cursor-pointer rounded-lg hover:bg-purple-50"
                           >
                             <Edit className="h-4 w-4 mr-2 text-purple-600" />
-                            Edit
+                            {offer.stage === 'INITIAL' ? 'Complete Offer' : 'Edit'}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>

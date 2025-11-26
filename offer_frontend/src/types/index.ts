@@ -1,9 +1,10 @@
 export enum UserRole {
   ADMIN = 'ADMIN',
+  ZONE_MANAGER = 'ZONE_MANAGER',
   ZONE_USER = 'ZONE_USER',
 }
 
-export type UserRoleType = 'ADMIN' | 'ZONE_USER';
+export type UserRoleType = 'ADMIN' | 'ZONE_MANAGER' | 'ZONE_USER';
 
 export type OfferStatus = 
   | 'OPEN'

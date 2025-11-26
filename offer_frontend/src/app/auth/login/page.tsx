@@ -25,7 +25,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { Loader2, CheckCircle2, Package } from "lucide-react";
+import { Loader2, CheckCircle2 } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 
 const loginSchema = z.object({
@@ -49,6 +49,8 @@ export default function LoginPage() {
         switch (role) {
           case 'ADMIN':
             return '/admin/dashboard';
+          case 'ZONE_MANAGER':
+            return '/zone-manager/dashboard';
           case 'ZONE_USER':
             return '/zone-user/dashboard';
           default:
@@ -135,10 +137,16 @@ export default function LoginPage() {
         <div className="text-center p-8">
           <div className="mb-6">
             <div className="mb-2">
+              {/* White background container for logo visibility */}
               <div className="bg-white rounded-2xl p-4 shadow-lg mx-auto inline-block">
-                <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/30">
-                  <Package className="h-6 w-6 text-white" />
-                </div>
+                <Image
+                  src="/kardex.png"
+                  alt="Offer Funnel Logo"
+                  width={200}
+                  height={80}
+                  className="mx-auto"
+                  priority
+                />
               </div>
             </div>
           </div>
@@ -193,9 +201,14 @@ export default function LoginPage() {
           {/* Header Section */}
           <CardHeader className="text-center bg-gradient-to-b from-white to-gray-50/50 p-8 pb-6">
             <div className="mb-6">
-              <div className="h-16 w-16 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/30 mx-auto">
-                <Package className="h-10 w-10 text-white" />
-              </div>
+              <Image
+                src="/kardex.png"
+                alt="Offer Funnel Logo"
+                width={200}
+                height={80}
+                className="mx-auto drop-shadow-sm"
+                priority
+              />
             </div>
             <CardTitle className="text-2xl font-bold text-[#507295] mb-2">
               Welcome 

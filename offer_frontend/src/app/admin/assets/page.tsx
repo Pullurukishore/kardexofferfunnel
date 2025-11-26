@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,7 +13,8 @@ import {
   AlertCircle,
   MapPin,
   Calendar,
-  Building2
+  Building2,
+  ArrowLeft
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { 
@@ -30,26 +31,33 @@ import { toast } from 'sonner';
 
 interface Asset {
   id: number;
-  machineId: string;
-  model: string | null;
-  serialNo: string | null;
-  location: string | null;
-  status: string;
-  purchaseDate: string | null;
-  warrantyEnd: string | null;
-  customer: {
+  machineId?: string;
+  assetName?: string;
+  model?: string | null;
+  serialNo?: string | null;
+  machineSerialNumber?: string | null;
+  location?: string | null;
+  status?: string;
+  isActive?: boolean;
+  purchaseDate?: string | null;
+  installationDate?: string | null;
+  warrantyEnd?: string | null;
+  warrantyExpiry?: string | null;
+  customer?: {
     id: number;
     companyName: string;
   };
-  _count: {
-    tickets?: number;
+  _count?: {
+    offers?: number;
   };
-  createdAt: string;
-  updatedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export default function AssetsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const customerIdParam = searchParams.get('customerId');
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -58,14 +66,88 @@ export default function AssetsPage() {
   const loadAssets = async () => {
     try {
       setLoading(true);
-      const params: any = {
-        limit: 1000 // Get all assets
-      };
+      const normalizeStatus = (a: any) => a?.status || (a?.isActive === false ? 'INACTIVE' : 'ACTIVE');
+
+      if (customerIdParam) {
+        let arr: any[] = [];
+        try {
+          const aResp = await apiService.getCustomerAssets(Number(customerIdParam));
+          arr = Array.isArray(aResp)
+            ? aResp
+            : (aResp?.data ?? aResp?.assets ?? aResp?.items ?? aResp?.rows ?? []);
+          if (!Array.isArray(arr)) arr = [];
+        } catch {
+          arr = [];
+        }
+        if (statusFilter !== 'all') {
+          arr = arr.filter((a: any) => normalizeStatus(a) === statusFilter);
+        }
+        if (searchTerm) {
+          const q = searchTerm.toLowerCase();
+          arr = arr.filter((a: any) =>
+            String(a?.machineId || a?.assetName || '').toLowerCase().includes(q) ||
+            String(a?.model || '').toLowerCase().includes(q) ||
+            String(a?.serialNo || a?.machineSerialNumber || '').toLowerCase().includes(q)
+          );
+        }
+        setAssets(arr);
+        return;
+      }
+
+      const params: any = { limit: 1000 };
       if (searchTerm) params.search = searchTerm;
       if (statusFilter !== 'all') params.status = statusFilter;
-      
-      const response = await apiService.getAssets(params);
-      setAssets(response.data || response || []);
+
+      let list: any[] = [];
+      try {
+        const response = await apiService.getAssets(params);
+        list = Array.isArray(response)
+          ? response
+          : (response?.data ?? response?.assets ?? response?.items ?? response?.rows ?? []);
+        if (!Array.isArray(list)) list = [];
+      } catch {
+        list = [];
+      }
+
+      if (list.length === 0) {
+        try {
+          const customersResp = await apiService.getCustomers({ isActive: 'true', limit: 1000 });
+          const customers = Array.isArray(customersResp)
+            ? customersResp
+            : (customersResp?.customers ?? customersResp?.data ?? customersResp ?? []);
+          const assetLists = await Promise.all(
+            (customers || []).map(async (c: any) => {
+              try {
+                const aResp = await apiService.getCustomerAssets(Number(c.id));
+                let arr = Array.isArray(aResp)
+                  ? aResp
+                  : (aResp?.data ?? aResp?.assets ?? aResp?.items ?? aResp?.rows ?? []);
+                if (!Array.isArray(arr)) arr = [];
+                return arr.map((a: any) => ({ ...a, customer: { id: c.id, companyName: c.companyName } }));
+              } catch {
+                return [] as any[];
+              }
+            })
+          );
+          list = assetLists.flat();
+        } catch {
+          list = [];
+        }
+
+        if (statusFilter !== 'all') {
+          list = list.filter((a: any) => normalizeStatus(a) === statusFilter);
+        }
+        if (searchTerm) {
+          const q = searchTerm.toLowerCase();
+          list = list.filter((a: any) =>
+            String(a?.machineId || a?.assetName || '').toLowerCase().includes(q) ||
+            String(a?.model || '').toLowerCase().includes(q) ||
+            String(a?.serialNo || a?.machineSerialNumber || '').toLowerCase().includes(q)
+          );
+        }
+      }
+
+      setAssets(list);
     } catch (error) {
       console.error('Error loading assets:', error);
       toast.error('Failed to load assets');
@@ -76,7 +158,7 @@ export default function AssetsPage() {
 
   useEffect(() => {
     loadAssets();
-  }, [searchTerm, statusFilter]);
+  }, [searchTerm, statusFilter, customerIdParam]);
 
   const getStatusBadgeStyles = (status: string) => {
     switch (status) {
@@ -113,6 +195,13 @@ export default function AssetsPage() {
             </p>
           </div>
           <div className="flex items-center space-x-2">
+            {customerIdParam && (
+              <Link href={`/admin/customers/${customerIdParam}`}>
+                <Button variant="outline" className="bg-white/10 border-white/30 text-white hover:bg-white/20">
+                  <ArrowLeft className="mr-2 h-4 w-4" /> Back to Customer
+                </Button>
+              </Link>
+            )}
             <Link href="/admin/customers">
               <Button className="bg-white text-purple-600 hover:bg-purple-50 shadow-lg">
                 <Plus className="mr-2 h-4 w-4" /> Add Asset to Customer
@@ -133,6 +222,13 @@ export default function AssetsPage() {
               </p>
             </div>
           </div>
+          {customerIdParam && (
+            <Link href={`/admin/customers/${customerIdParam}`}>
+              <Button variant="outline" className="mb-2 w-full border-white/30 text-white hover:bg-white/10">
+                <ArrowLeft className="mr-2 h-4 w-4" /> Back to Customer
+              </Button>
+            </Link>
+          )}
           <Link href="/admin/customers">
             <Button className="bg-white text-purple-600 hover:bg-purple-50 shadow-lg w-full">
               <Plus className="mr-2 h-4 w-4" /> Add Asset
@@ -190,15 +286,15 @@ export default function AssetsPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <CardTitle className="text-sm sm:text-base font-semibold truncate">
-                          {asset.machineId}
+                          {asset.machineId || asset.assetName}
                         </CardTitle>
                         <p className="text-xs sm:text-sm text-gray-600 truncate">
                           {asset.model || 'No model specified'}
                         </p>
                       </div>
                     </div>
-                    <span className={`${getStatusBadgeStyles(asset.status)} text-xs px-2 py-1 rounded-full font-medium flex-shrink-0`}>
-                      {asset.status}
+                    <span className={`${getStatusBadgeStyles(asset.status || (asset.isActive === false ? 'INACTIVE' : 'ACTIVE'))} text-xs px-2 py-1 rounded-full font-medium flex-shrink-0`}>
+                      {asset.status || (asset.isActive === false ? 'INACTIVE' : 'ACTIVE')}
                     </span>
                   </div>
                 </CardHeader>
@@ -206,11 +302,11 @@ export default function AssetsPage() {
                   <div className="space-y-2">
                     <div className="flex items-center text-xs sm:text-sm text-gray-600">
                       <Building2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 flex-shrink-0" />
-                      <span className="truncate">{asset.customer.companyName}</span>
+                      <span className="truncate">{asset.customer?.companyName || '—'}</span>
                     </div>
-                    {asset.serialNo && (
+                    {(asset.serialNo || asset.machineSerialNumber) && (
                       <div className="text-xs sm:text-sm text-gray-600">
-                        <span className="font-medium">Serial:</span> <span className="break-all">{asset.serialNo}</span>
+                        <span className="font-medium">Serial:</span> <span className="break-all">{asset.serialNo || asset.machineSerialNumber}</span>
                       </div>
                     )}
                     {asset.location && (
@@ -219,19 +315,19 @@ export default function AssetsPage() {
                         <span className="truncate">{asset.location}</span>
                       </div>
                     )}
-                    {asset.purchaseDate && (
+                    {(asset.purchaseDate || asset.installationDate) && (
                       <div className="flex items-center text-xs sm:text-sm text-gray-600">
                         <Calendar className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 flex-shrink-0" />
-                        <span className="truncate">Purchased: {format(new Date(asset.purchaseDate), 'MMM dd, yyyy')}</span>
+                        <span className="truncate">Purchased: {format(new Date(asset.purchaseDate || asset.installationDate as string), 'MMM dd, yyyy')}</span>
                       </div>
                     )}
                     <div className="flex justify-between items-center pt-2 border-t">
                       <span className="text-xs text-gray-500">
-                        {asset._count?.tickets || 0} ticket{asset._count?.tickets !== 1 ? 's' : ''}
+                        {((asset._count?.offers ?? (asset as any)._count?.offerAssets) ?? 0)} offer{(((asset._count?.offers ?? (asset as any)._count?.offerAssets) ?? 0) !== 1) ? 's' : ''}
                       </span>
-                      {asset.warrantyEnd && (
+                      {(asset.warrantyEnd || asset.warrantyExpiry) && (
                         <span className="text-xs text-gray-500 truncate ml-2">
-                          Warranty: {format(new Date(asset.warrantyEnd), 'MMM yyyy')}
+                          Warranty: {format(new Date(asset.warrantyEnd || asset.warrantyExpiry as string), 'MMM yyyy')}
                         </span>
                       )}
                     </div>

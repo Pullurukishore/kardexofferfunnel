@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -33,7 +33,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { 
   Search, 
-  Download, 
   MoreHorizontal, 
   Edit, 
   Trash2, 
@@ -65,6 +64,7 @@ import { apiService } from '@/services/api'
 import { toast } from 'sonner'
 
 const stages = ['All Stage', 'INITIAL', 'PROPOSAL_SENT', 'NEGOTIATION', 'FINAL_APPROVAL', 'PO_RECEIVED', 'ORDER_BOOKED', 'WON', 'LOST']
+const productTypes = ['All Product Types', 'RELOCATION', 'CONTRACT', 'SPP', 'UPGRADE_KIT', 'SOFTWARE', 'BD_CHARGES', 'BD_SPARE', 'MIDLIFE_UPGRADE', 'RETROFIT_KIT']
 
 export default function OfferManagement() {
   const router = useRouter()
@@ -74,13 +74,16 @@ export default function OfferManagement() {
   const [loading, setLoading] = useState(true)
   const [editingOffer, setEditingOffer] = useState<any>(null)
   const [showEditDialog, setShowEditDialog] = useState(false)
-  const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, pages: 0 })
+  const [pagination, setPagination] = useState({ page: 1, limit: 100, total: 0, pages: 0 })
 
   // Filter states
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedZone, setSelectedZone] = useState('All Zones')
   const [selectedStage, setSelectedStage] = useState('All Stage')
   const [selectedUser, setSelectedUser] = useState('All Users')
+  const [selectedProductType, setSelectedProductType] = useState('All Product Types')
+  const [sortField, setSortField] = useState<string>('')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
 
   // Debounce search to prevent excessive API calls
   useEffect(() => {
@@ -89,7 +92,7 @@ export default function OfferManagement() {
     }, searchTerm ? 500 : 0) // 500ms delay for search, immediate for other filters
 
     return () => clearTimeout(timeoutId)
-  }, [searchTerm, selectedZone, selectedStage, selectedUser, pagination.page])
+  }, [searchTerm, selectedZone, selectedStage, selectedUser, selectedProductType, pagination.page])
 
   useEffect(() => {
     fetchZones()
@@ -108,8 +111,8 @@ export default function OfferManagement() {
 
   const fetchUsers = async () => {
     try {
-      const response = await apiService.getUsers({ limit: 100 }) // Get all users for filter
-      setUsers(response.users || [])
+      const response = await apiService.getUsers({ isActive: 'true' }) // Get only active users
+      setUsers(response.data?.users || response.users || [])
     } catch (error: any) {
       console.error('Failed to fetch users:', error)
       toast.error(error.response?.data?.message || 'Failed to fetch users')
@@ -131,13 +134,13 @@ export default function OfferManagement() {
       }
       if (selectedStage !== 'All Stage') params.stage = selectedStage
       if (selectedUser !== 'All Users') {
-        const user = users.find(u => u.name === selectedUser)
-        if (user) params.assignedToId = user.id
+        params.createdById = parseInt(selectedUser)
       }
+      if (selectedProductType !== 'All Product Types') params.productType = selectedProductType
 
       const response = await apiService.getOffers(params)
       setOffers(response.offers || [])
-      setPagination(response.pagination || { page: 1, limit: 20, total: 0, pages: 0 })
+      setPagination(response.pagination || { page: 1, limit: 100, total: 0, pages: 0 })
     } catch (error: any) {
       console.error('Failed to fetch offers:', error)
       toast.error(error.response?.data?.error || 'Failed to fetch offers')
@@ -174,20 +177,55 @@ export default function OfferManagement() {
     }
   }
 
-  const handleExport = () => {
-    console.log('Exporting offers:', offers)
-    // Implement export functionality
-  }
 
   const clearFilters = () => {
     setSearchTerm('')
     setSelectedZone('All Zones')
     setSelectedStage('All Stage')
     setSelectedUser('All Users')
+    setSelectedProductType('All Product Types')
     setPagination(prev => ({ ...prev, page: 1 }))
   }
 
-  const hasActiveFilters = searchTerm || selectedZone !== 'All Zones' || selectedStage !== 'All Stage' || selectedUser !== 'All Users'
+  const hasActiveFilters = searchTerm || selectedZone !== 'All Zones' || selectedStage !== 'All Stage' || selectedUser !== 'All Users' || selectedProductType !== 'All Product Types'
+
+  // Sort offers
+  const sortedOffers = useMemo(() => {
+    if (!sortField) return offers
+    
+    return [...offers].sort((a, b) => {
+      let aValue = a[sortField]
+      let bValue = b[sortField]
+      
+      // Handle nested properties
+      if (sortField === 'customer') {
+        aValue = a.customer?.companyName || a.company || ''
+        bValue = b.customer?.companyName || b.company || ''
+      } else if (sortField === 'zone') {
+        aValue = a.zone?.name || ''
+        bValue = b.zone?.name || ''
+      } else if (sortField === 'createdBy') {
+        aValue = a.createdBy?.name || ''
+        bValue = b.createdBy?.name || ''
+      } else if (sortField === 'offerValue') {
+        aValue = Number(a.offerValue || 0)
+        bValue = Number(b.offerValue || 0)
+      }
+      
+      if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1
+      if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1
+      return 0
+    })
+  }, [offers, sortField, sortDirection])
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDirection('asc')
+    }
+  }
 
   // Calculate statistics
   const stats = {
@@ -202,124 +240,45 @@ export default function OfferManagement() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="max-w-[1800px] mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
-        {/* Header */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 rounded-3xl shadow-2xl p-8 text-white">
-          <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
-          <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-500/20 rounded-full blur-2xl translate-y-1/2 -translate-x-1/2"></div>
-          <div className="relative z-10 flex justify-between items-start">
-            <div className="space-y-2">
-              <div className="flex items-center gap-4">
-                <div className="p-4 bg-white/20 backdrop-blur-sm rounded-2xl ring-2 ring-white/30 shadow-lg">
-                  <Sparkles className="h-10 w-10" />
-                </div>
-                <div>
-                  <h1 className="text-4xl font-bold tracking-tight">Offer Management</h1>
-                  <p className="text-blue-100 mt-2 text-lg">Track, manage, and convert offers to orders</p>
-                </div>
+      <div className="w-full p-4 sm:p-6 lg:p-8 space-y-6">
+        {/* Compact Header with Stats */}
+        <div className="relative overflow-hidden bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-700 rounded-2xl shadow-xl p-6 text-white">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
+          <div className="relative z-10 flex justify-between items-center">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-white/20 backdrop-blur-sm rounded-xl ring-2 ring-white/30">
+                <Sparkles className="h-8 w-8" />
               </div>
-              <div className="grid grid-cols-2 gap-4 mt-6">
-                <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/20">
-                  <p className="text-blue-100 text-sm font-medium">Total Value</p>
-                  <p className="text-3xl font-bold mt-1">{formatCurrency(stats.totalValue)}</p>
-                </div>
-                <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/20">
-                  <p className="text-blue-100 text-sm font-medium">Win Rate</p>
-                  <div className="flex items-baseline gap-2 mt-1">
-                    <p className="text-3xl font-bold">{stats.conversionRate.toFixed(1)}%</p>
-                    <span className="text-green-300 text-sm flex items-center">
-                      <ArrowUpRight className="h-4 w-4" />
-                      +2.4%
-                    </span>
-                  </div>
-                </div>
+              <div>
+                <h1 className="text-3xl font-bold">Offer Management</h1>
+                <p className="text-emerald-100 mt-1">Track, manage, and convert offers to orders</p>
               </div>
             </div>
-            <div className="flex gap-3">
-              <Button onClick={handleExport} variant="secondary" className="bg-white/20 hover:bg-white/30 text-white border-white/30 backdrop-blur-sm hover:shadow-xl transition-all">
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
-              <Button onClick={() => router.push('/admin/offers/new')} className="bg-white text-blue-700 hover:bg-blue-50 shadow-xl hover:shadow-2xl transition-all hover:scale-105">
+            <div className="flex items-center gap-4">
+              <div className="grid grid-cols-4 gap-3">
+                <div className="bg-white/10 backdrop-blur-md rounded-lg px-4 py-2 border border-white/20 text-center">
+                  <p className="text-emerald-100 text-xs font-medium">Total</p>
+                  <p className="text-2xl font-bold">{stats.total}</p>
+                </div>
+                <div className="bg-white/10 backdrop-blur-md rounded-lg px-4 py-2 border border-white/20 text-center">
+                  <p className="text-emerald-100 text-xs font-medium">Won</p>
+                  <p className="text-2xl font-bold">{stats.won}</p>
+                </div>
+                <div className="bg-white/10 backdrop-blur-md rounded-lg px-4 py-2 border border-white/20 text-center">
+                  <p className="text-emerald-100 text-xs font-medium">Win Rate</p>
+                  <p className="text-2xl font-bold">{stats.conversionRate.toFixed(0)}%</p>
+                </div>
+                <div className="bg-white/10 backdrop-blur-md rounded-lg px-4 py-2 border border-white/20 text-center">
+                  <p className="text-emerald-100 text-xs font-medium">Value</p>
+                  <p className="text-xl font-bold">{formatCurrency(stats.totalValue).replace('₹', '₹')}</p>
+                </div>
+              </div>
+              <Button onClick={() => router.push('/admin/offers/new')} className="bg-white text-emerald-700 hover:bg-emerald-50 shadow-lg hover:shadow-xl transition-all">
                 <Plus className="h-4 w-4 mr-2" />
-                Create New Offer
+                Create New
               </Button>
             </div>
           </div>
-        </div>
-
-        {/* Sales Statistics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {/* Total Offers */}
-          <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-blue-600/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <CardTitle className="text-sm font-semibold text-slate-600">Total Offers</CardTitle>
-              <div className="h-10 w-10 rounded-xl bg-blue-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Target className="h-5 w-5 text-blue-600" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-slate-900">{stats.total}</div>
-              <p className="text-xs text-slate-500 mt-2">
-                <span className="text-blue-600 font-medium">{stats.active}</span> active offers
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Deals Won */}
-          <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-emerald-600/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <CardTitle className="text-sm font-semibold text-slate-600">Deals Won</CardTitle>
-              <div className="h-10 w-10 rounded-xl bg-emerald-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Award className="h-5 w-5 text-emerald-600" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-slate-900">{stats.won}</div>
-              <p className="text-xs text-emerald-600 mt-2 flex items-center gap-1 font-medium">
-                <ArrowUpRight className="h-3 w-3" />
-                {stats.conversionRate.toFixed(1)}% conversion rate
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Average Deal Value */}
-          <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-purple-600/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <CardTitle className="text-sm font-semibold text-slate-600">Avg Deal Value</CardTitle>
-              <div className="h-10 w-10 rounded-xl bg-purple-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <DollarSign className="h-5 w-5 text-purple-600" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-slate-900">
-                {stats.avgValue > 0 ? formatCurrency(stats.avgValue) : '₹0'}
-              </div>
-              <p className="text-xs text-slate-500 mt-2">
-                Per qualified deal
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Pipeline Value */}
-          <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-amber-600/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <CardTitle className="text-sm font-semibold text-slate-600">Total Offer Value</CardTitle>
-              <div className="h-10 w-10 rounded-xl bg-amber-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <BarChart3 className="h-5 w-5 text-amber-600" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-slate-900">{formatCurrency(stats.totalValue)}</div>
-              <p className="text-xs text-slate-500 mt-2">
-                Total opportunity value
-              </p>
-            </CardContent>
-          </Card>
         </div>
 
         {/* Filters */}
@@ -327,14 +286,14 @@ export default function OfferManagement() {
           <CardHeader className="bg-white border-b border-slate-200" style={{backgroundColor: 'white'}}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Filter className="h-5 w-5 text-blue-600" />
+                <Filter className="h-5 w-5 text-indigo-600" />
                 <CardTitle className="text-lg">Search & Filter</CardTitle>
                 {hasActiveFilters && (
                   <Badge variant="secondary" className="ml-2">Active</Badge>
                 )}
               </div>
               {hasActiveFilters && (
-                <Button variant="ghost" size="sm" onClick={clearFilters} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50">
+                <Button variant="ghost" size="sm" onClick={clearFilters} className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50">
                   <X className="h-4 w-4 mr-1" />
                   Clear All
                 </Button>
@@ -342,11 +301,11 @@ export default function OfferManagement() {
             </div>
           </CardHeader>
           <CardContent className="pt-6 bg-white" style={{backgroundColor: 'white'}}>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               {/* Search */}
               <div className="space-y-2">
                 <Label htmlFor="search" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                  <Search className="h-4 w-4 text-blue-600" />
+                  <Search className="h-4 w-4 text-emerald-600" />
                   Search Offers
                 </Label>
                 <div className="relative">
@@ -357,7 +316,7 @@ export default function OfferManagement() {
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     disabled={loading}
-                    className="pl-10 h-11 border-gray-200 focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="pl-10 h-11 border-gray-200 focus:border-emerald-500 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -365,14 +324,14 @@ export default function OfferManagement() {
               {/* Zone Filter */}
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                  <MapPin className="h-4 w-4 text-blue-600" />
+                  <MapPin className="h-4 w-4 text-orange-600" />
                   Zone
                 </Label>
                 <Select value={selectedZone} onValueChange={setSelectedZone} disabled={loading}>
-                  <SelectTrigger className="h-11 border-gray-200 focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed">
+                  <SelectTrigger className="h-11 border-gray-200 focus:border-orange-500 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-[300px] overflow-y-auto">
                     <SelectItem value="All Zones">All Zones</SelectItem>
                     {zones.map(zone => (
                       <SelectItem key={zone.id} value={zone.name}>{zone.name}</SelectItem>
@@ -384,14 +343,14 @@ export default function OfferManagement() {
               {/* Stage Filter */}
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-blue-600" />
+                  <TrendingUp className="h-4 w-4 text-purple-600" />
                   Stage
                 </Label>
                 <Select value={selectedStage} onValueChange={setSelectedStage} disabled={loading}>
-                  <SelectTrigger className="h-11 border-gray-200 focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed">
+                  <SelectTrigger className="h-11 border-gray-200 focus:border-purple-500 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-[300px] overflow-y-auto">
                     {stages.map(stage => (
                       <SelectItem key={stage} value={stage}>{stage.replace(/_/g, ' ')}</SelectItem>
                     ))}
@@ -402,17 +361,37 @@ export default function OfferManagement() {
               {/* User Filter */}
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                  <Users className="h-4 w-4 text-blue-600" />
+                  <Users className="h-4 w-4 text-teal-600" />
                   Created By
                 </Label>
                 <Select value={selectedUser} onValueChange={setSelectedUser} disabled={loading}>
-                  <SelectTrigger className="h-11 border-gray-200 focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed">
+                  <SelectTrigger className="h-11 border-gray-200 focus:border-teal-500 focus:ring-teal-500 disabled:opacity-50 disabled:cursor-not-allowed">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-[300px] overflow-y-auto">
                     <SelectItem value="All Users">All Users</SelectItem>
                     {users.map(user => (
-                      <SelectItem key={user.id} value={user.name}>{user.name}</SelectItem>
+                      <SelectItem key={user.id} value={user.id.toString()}>
+                        {user.name ? `${user.name} (${user.email})` : user.email}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Product Type Filter */}
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <Package className="h-4 w-4 text-pink-600" />
+                  Product Type
+                </Label>
+                <Select value={selectedProductType} onValueChange={setSelectedProductType} disabled={loading}>
+                  <SelectTrigger className="h-11 border-gray-200 focus:border-pink-500 focus:ring-pink-500 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[300px] overflow-y-auto">
+                    {productTypes.map(type => (
+                      <SelectItem key={type} value={type}>{type === 'All Product Types' ? type : type.replace(/_/g, ' ')}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -422,65 +401,80 @@ export default function OfferManagement() {
         </Card>
 
         {/* Offers Table */}
-        <Card className="border-0 shadow-xl overflow-hidden">
-          <CardHeader className="bg-gradient-to-r from-slate-50 via-blue-50 to-purple-50/30 border-b">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-xl font-bold text-slate-900">All Offers</CardTitle>
-                <CardDescription className="text-slate-600 mt-1">
-                  {!loading && offers.length > 0 ? `Showing ${offers.length} of ${pagination.total} offers` : 'Manage your sales opportunities'}
-                </CardDescription>
-              </div>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={fetchOffers}
-                className="gap-2 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 transition-all"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Refresh
-              </Button>
-            </div>
-          </CardHeader>
+        <Card className="border-0 shadow-2xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gradient-to-r from-slate-100 via-blue-50 to-purple-50/50 border-b-2 border-slate-200">
+              <thead className="bg-gradient-to-r from-slate-100 via-blue-50 to-purple-50/50 border-b-2 border-slate-200 sticky top-0 z-10">
                 <tr>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
-                    Offer #
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('offerReferenceNumber')}>
+                    <div className="flex items-center gap-2">
+                      Offer #
+                      {sortField === 'offerReferenceNumber' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('customer')}>
                     <div className="flex items-center gap-2">
                       <Building2 className="h-4 w-4" />
                       Customer
+                      {sortField === 'customer' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('productType')}>
                     <div className="flex items-center gap-2">
                       <Package className="h-4 w-4" />
                       Product Type
+                      {sortField === 'productType' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('zone')}>
                     <div className="flex items-center gap-2">
                       <MapPin className="h-4 w-4" />
                       Zone
+                      {sortField === 'zone' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('offerValue')}>
                     <div className="flex items-center gap-2">
                       <IndianRupee className="h-4 w-4" />
                       Value
+                      {sortField === 'offerValue' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('stage')}>
                     <div className="flex items-center gap-2">
                       <TrendingUp className="h-4 w-4" />
                       Stage
+                      {sortField === 'stage' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
                     </div>
                   </th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Added By</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Date</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('createdBy')}>
+                    <div className="flex items-center gap-2">
+                      Added By
+                      {sortField === 'createdBy' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => handleSort('createdAt')}>
+                    <div className="flex items-center gap-2">
+                      Date
+                      {sortField === 'createdAt' && (
+                        <span>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
@@ -520,7 +514,7 @@ export default function OfferManagement() {
                     </td>
                   </tr>
                 ) : (
-                  offers.map((offer: any) => (
+                  sortedOffers.map((offer: any) => (
                   <tr key={offer.id} className="border-b border-slate-100 hover:bg-gradient-to-r hover:from-blue-50/50 hover:via-indigo-50/30 hover:to-purple-50/20 transition-all duration-200 group">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
@@ -539,7 +533,7 @@ export default function OfferManagement() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white font-bold text-sm shadow-md ring-2 ring-blue-100 group-hover:scale-110 transition-transform">
+                        <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-600 flex items-center justify-center text-white font-bold text-sm shadow-md ring-2 ring-emerald-100 group-hover:scale-110 transition-transform">
                           {(offer.customer?.companyName || offer.company || 'U')?.charAt(0).toUpperCase()}
                         </div>
                         <div>
@@ -553,9 +547,15 @@ export default function OfferManagement() {
                         offer.productType === 'SPP' ? 'bg-gradient-to-r from-orange-100 to-orange-50 text-orange-800 border-orange-300 shadow-sm' :
                         offer.productType === 'CONTRACT' ? 'bg-gradient-to-r from-emerald-100 to-emerald-50 text-emerald-800 border-emerald-300 shadow-sm' :
                         offer.productType === 'RELOCATION' ? 'bg-gradient-to-r from-blue-100 to-blue-50 text-blue-800 border-blue-300 shadow-sm' :
+                        offer.productType === 'UPGRADE_KIT' ? 'bg-gradient-to-r from-purple-100 to-purple-50 text-purple-800 border-purple-300 shadow-sm' :
+                        offer.productType === 'SOFTWARE' ? 'bg-gradient-to-r from-indigo-100 to-indigo-50 text-indigo-800 border-indigo-300 shadow-sm' :
+                        offer.productType === 'BD_CHARGES' ? 'bg-gradient-to-r from-amber-100 to-amber-50 text-amber-800 border-amber-300 shadow-sm' :
+                        offer.productType === 'BD_SPARE' ? 'bg-gradient-to-r from-rose-100 to-rose-50 text-rose-800 border-rose-300 shadow-sm' :
+                        offer.productType === 'MIDLIFE_UPGRADE' ? 'bg-gradient-to-r from-cyan-100 to-cyan-50 text-cyan-800 border-cyan-300 shadow-sm' :
+                        offer.productType === 'RETROFIT_KIT' ? 'bg-gradient-to-r from-teal-100 to-teal-50 text-teal-800 border-teal-300 shadow-sm' :
                         'bg-gradient-to-r from-gray-100 to-gray-50 text-gray-800 border-gray-300 shadow-sm'
                       } font-semibold px-3 py-1`}>
-                        {offer.productType}
+                        {offer.productType?.replace(/_/g, ' ')}
                       </Badge>
                     </td>
                     <td className="px-6 py-4">

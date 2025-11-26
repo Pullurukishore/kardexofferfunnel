@@ -77,6 +77,9 @@ export default function TargetViewPage() {
     return 'from-red-500 to-pink-500';
   };
 
+  // Product types from backend enum
+  const productTypes = ['RELOCATION', 'CONTRACT', 'SPP', 'UPGRADE_KIT', 'SOFTWARE', 'BD_CHARGES', 'BD_SPARE', 'MIDLIFE_UPGRADE', 'RETROFIT_KIT'];
+
   const overallTarget = targets.find(t => !t.productType);
   const productTargets = targets.filter(t => t.productType);
   const totalTarget = targets.reduce((sum, t) => sum + t.targetValue, 0);
@@ -165,56 +168,88 @@ export default function TargetViewPage() {
               </div>
             )}
 
-            {/* Product-Specific Targets */}
-            {productTargets.length > 0 && (
-              <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-                <div className="bg-gradient-to-r from-purple-50 to-indigo-50 px-6 py-4 border-b border-purple-100">
-                  <div className="flex items-center gap-3">
-                    <Package className="w-6 h-6 text-purple-600" />
-                    <h2 className="text-xl font-bold text-slate-900">Product-Specific Targets</h2>
-                    <span className="ml-auto bg-purple-600 text-white px-3 py-1 rounded-full text-sm font-bold">
-                      {productTargets.length} Products
-                    </span>
-                  </div>
-                </div>
-                <div className="p-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {productTargets.map((target) => (
-                      <div key={target.id} className="border-2 border-purple-200 rounded-xl p-5 bg-gradient-to-br from-white to-purple-50/30 hover:shadow-lg transition-all">
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-2">
-                            <div className="w-10 h-10 bg-purple-600 rounded-lg flex items-center justify-center">
-                              <Package className="w-6 h-6 text-white" />
-                            </div>
-                            <h3 className="text-lg font-bold text-slate-900">{target.productType}</h3>
-                          </div>
-                          <div className={`px-4 py-2 rounded-xl text-lg font-bold text-white bg-gradient-to-r ${getAchievementColor(target.achievement)} shadow-md`}>
-                            {target.achievement.toFixed(1)}%
-                          </div>
-                        </div>
-                        
-                        <div className="grid grid-cols-3 gap-4">
-                          <div>
-                            <div className="text-xs font-semibold text-slate-600 mb-1">Target</div>
-                            <div className="text-lg font-bold text-blue-600">₹{target.targetValue.toLocaleString()}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs font-semibold text-slate-600 mb-1">Actual</div>
-                            <div className="text-lg font-bold text-green-600">₹{target.actualValue.toLocaleString()}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs font-semibold text-slate-600 mb-1">Gap</div>
-                            <div className={`text-lg font-bold ${target.actualValue >= target.targetValue ? 'text-green-600' : 'text-red-600'}`}>
-                              ₹{Math.abs(target.actualValue - target.targetValue).toLocaleString()}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+            {/* Product-Specific Targets - Show all product types */}
+            <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+              <div className="bg-gradient-to-r from-purple-50 to-indigo-50 px-6 py-4 border-b border-purple-100">
+                <div className="flex items-center gap-3">
+                  <Package className="w-6 h-6 text-purple-600" />
+                  <h2 className="text-xl font-bold text-slate-900">Product-Specific Targets</h2>
+                  <span className="ml-auto bg-purple-600 text-white px-3 py-1 rounded-full text-sm font-bold">
+                    {productTargets.length} / {productTypes.length} Products
+                  </span>
                 </div>
               </div>
-            )}
+              <div className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {productTypes.map((productType) => {
+                    const target = productTargets.find(t => t.productType === productType);
+                    const hasTarget = !!target;
+                    const targetValue = target?.targetValue || 0;
+                    const actualValue = target?.actualValue || 0;
+                    const achievement = target?.achievement || 0;
+                    
+                    return (
+                      <div key={productType} className={`rounded-xl p-5 transition-all ${
+                        hasTarget 
+                          ? 'border-2 border-purple-200 bg-gradient-to-br from-white to-purple-50/30 hover:shadow-lg hover:border-purple-400' 
+                          : 'border-2 border-slate-200 bg-gradient-to-br from-white to-slate-50/30 hover:shadow-md'
+                      }`}>
+                        {/* Header Section */}
+                        <div className="flex items-start gap-3 mb-4">
+                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                            hasTarget ? 'bg-purple-600' : 'bg-slate-400'
+                          }`}>
+                            <Package className="w-6 h-6 text-white" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-base font-bold text-slate-900 break-words">{productType}</h3>
+                            {!hasTarget && (
+                              <span className="inline-block mt-1 text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-semibold">
+                                No Target
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Achievement Badge */}
+                        {hasTarget && (
+                          <div className="mb-4">
+                            <div className={`inline-block px-4 py-2 rounded-xl text-base font-bold text-white bg-gradient-to-r ${getAchievementColor(achievement)} shadow-md`}>
+                              {achievement.toFixed(1)}% Achievement
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Stats Section */}
+                        {hasTarget ? (
+                          <div className="space-y-3">
+                            <div>
+                              <div className="text-xs font-semibold text-slate-600 mb-1">Target Value</div>
+                              <div className="text-lg font-bold text-blue-600">₹{targetValue.toLocaleString()}</div>
+                            </div>
+                            <div>
+                              <div className="text-xs font-semibold text-slate-600 mb-1">Actual Value</div>
+                              <div className="text-lg font-bold text-green-600">₹{actualValue.toLocaleString()}</div>
+                            </div>
+                            <div>
+                              <div className="text-xs font-semibold text-slate-600 mb-1">Gap</div>
+                              <div className={`text-lg font-bold ${actualValue >= targetValue ? 'text-green-600' : 'text-red-600'}`}>
+                                ₹{Math.abs(actualValue - targetValue).toLocaleString()}
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-center py-4">
+                            <p className="text-sm text-slate-500">No target set for this product type</p>
+                            <p className="text-xs text-slate-400 mt-1">💡 Set a target in edit mode</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
 
             {/* No Targets */}
             {targets.length === 0 && (

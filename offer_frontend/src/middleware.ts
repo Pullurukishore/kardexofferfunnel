@@ -6,6 +6,8 @@ function getRoleBasedRedirect(role?: UserRole): string {
   switch (role) {
     case UserRole.ADMIN:
       return '/admin/dashboard';
+    case UserRole.ZONE_MANAGER:
+      return '/zone-manager/dashboard';
     case UserRole.ZONE_USER:
       return '/zone-user/dashboard';
     default:
@@ -26,7 +28,12 @@ function isRouteAccessible(pathname: string, role?: UserRole): boolean {
     return role === UserRole.ADMIN;
   }
 
-  // Zone routes
+  // Zone Manager routes
+  if (pathname.startsWith('/zone-manager/')) {
+    return role === UserRole.ZONE_MANAGER || role === UserRole.ADMIN;
+  }
+
+  // Zone User routes
   if (pathname.startsWith('/zone-user/')) {
     return role === UserRole.ZONE_USER || role === UserRole.ADMIN;
   }
@@ -80,6 +87,16 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
+  // Check if backend is offline by checking network error flag
+  const networkErrorCount = parseInt(request.cookies.get('auth_network_errors')?.value || '0');
+  if (networkErrorCount > 3) {
+    console.log('Middleware - Too many network errors, allowing cached access');
+    // Allow access to dashboard with cached tokens when backend is offline
+    if (authToken && userRole && pathname !== '/auth/login') {
+      return NextResponse.next();
+    }
+  }
+
   // Handle public routes
   if (!shouldRedirectToLogin(pathname)) {
     return NextResponse.next();
@@ -88,7 +105,22 @@ export async function middleware(request: NextRequest) {
   // Special handling for root path
   if (pathname === '/') {
     if (authToken && userRole) {
-      return NextResponse.redirect(new URL(getRoleBasedRedirect(userRole), request.url));
+      // Prevent infinite redirect loops by checking redirect flag
+      const redirectPending = request.cookies.get('auth_redirect_pending')?.value;
+      if (!redirectPending) {
+        const response = NextResponse.redirect(new URL(getRoleBasedRedirect(userRole), request.url));
+        response.cookies.set('auth_redirect_pending', 'true', { 
+          path: '/', 
+          maxAge: 60, // 1 minute
+          httpOnly: false 
+        });
+        return response;
+      } else {
+        // Clear the flag and allow access to prevent loops
+        const response = NextResponse.next();
+        response.cookies.delete('auth_redirect_pending');
+        return response;
+      }
     }
     return NextResponse.next();
   }
@@ -105,9 +137,23 @@ export async function middleware(request: NextRequest) {
     const redirectPath = getRoleBasedRedirect(userRole);
     console.log(`Middleware: Redirecting ${userRole} from ${pathname} to ${redirectPath}`);
     
-    const response = NextResponse.redirect(new URL(redirectPath, request.url));
-    response.headers.set('X-Redirect-Reason', 'role-access');
-    return response;
+    // Prevent infinite redirect loops
+    const redirectPending = request.cookies.get('auth_redirect_pending')?.value;
+    if (!redirectPending) {
+      const response = NextResponse.redirect(new URL(redirectPath, request.url));
+      response.cookies.set('auth_redirect_pending', 'true', { 
+        path: '/', 
+        maxAge: 60, // 1 minute
+        httpOnly: false 
+      });
+      response.headers.set('X-Redirect-Reason', 'role-access');
+      return response;
+    } else {
+      // Clear the flag and allow access to prevent loops
+      const response = NextResponse.next();
+      response.cookies.delete('auth_redirect_pending');
+      return response;
+    }
   }
 
   return NextResponse.next();

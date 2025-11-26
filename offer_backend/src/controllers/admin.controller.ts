@@ -1,8 +1,7 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-
-const prisma = new PrismaClient();
+import { AuthRequest } from '../middleware/auth.middleware';
+import { prisma } from '../lib/prisma';
 
 // Dashboard Analytics
 export const getDashboardStats = async (req: Request, res: Response) => {
@@ -394,6 +393,129 @@ export const createUser = async (req: Request, res: Response) => {
 };
 
 // Zone Management
+
+/**
+ * Create a new service zone
+ */
+export const createZone = async (req: any, res: Response) => {
+  try {
+    const { name, description } = req.body;
+
+    // Validation
+    if (!name || name.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Zone name is required'
+      });
+    }
+
+    // Check if zone already exists
+    const existingZone = await prisma.serviceZone.findFirst({
+      where: { name: name.trim() }
+    });
+
+    if (existingZone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Zone with this name already exists'
+      });
+    }
+
+    // Create new zone
+    const zone = await prisma.serviceZone.create({
+      data: {
+        name: name.trim(),
+        description: description?.trim() || null,
+        isActive: true
+      }
+    });
+
+    console.log(`Zone created: ${zone.name} by admin ${req.user?.email}`);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Zone created successfully',
+      data: {
+        id: zone.id,
+        name: zone.name,
+        description: zone.description,
+        isActive: zone.isActive,
+        createdAt: zone.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Create zone error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create zone'
+    });
+  }
+};
+
+/**
+ * Update a service zone
+ */
+export const updateZone = async (req: any, res: Response) => {
+  try {
+    const { zoneId } = req.params;
+    const { name, description, isActive } = req.body;
+
+    const zone = await prisma.serviceZone.findUnique({
+      where: { id: parseInt(zoneId) }
+    });
+
+    if (!zone) {
+      return res.status(404).json({
+        success: false,
+        message: 'Zone not found'
+      });
+    }
+
+    // Check if new name already exists (if changing name)
+    if (name && name.trim() !== zone.name) {
+      const existingZone = await prisma.serviceZone.findFirst({
+        where: { name: name.trim() }
+      });
+
+      if (existingZone) {
+        return res.status(400).json({
+          success: false,
+          message: 'Zone with this name already exists'
+        });
+      }
+    }
+
+    const updatedZone = await prisma.serviceZone.update({
+      where: { id: parseInt(zoneId) },
+      data: {
+        name: name ? name.trim() : zone.name,
+        description: description !== undefined ? description?.trim() || null : zone.description,
+        isActive: isActive !== undefined ? isActive : zone.isActive
+      }
+    });
+
+    console.log(`Zone updated: ${updatedZone.name} by admin ${req.user?.email}`);
+
+    return res.json({
+      success: true,
+      message: 'Zone updated successfully',
+      data: {
+        id: updatedZone.id,
+        name: updatedZone.name,
+        description: updatedZone.description,
+        isActive: updatedZone.isActive,
+        createdAt: updatedZone.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Update zone error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update zone'
+    });
+  }
+};
+
 export const getAllZones = async (req: Request, res: Response) => {
   try {
     const zones = await prisma.serviceZone.findMany({
@@ -686,6 +808,141 @@ export const getActivityLogs = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch activity logs'
+    });
+  }
+};
+
+export const getZoneUsers = async (req: AuthRequest, res: Response) => {
+  try {
+    const { page = 1, limit = 20, search, isActive } = req.query;
+    
+    const skip = (Number(page) - 1) * Number(limit);
+    
+    // Get the current user's zone from their serviceZones
+    const currentUser = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      include: {
+        serviceZones: {
+          include: {
+            serviceZone: true
+          }
+        }
+      }
+    });
+
+    if (!currentUser || currentUser.serviceZones.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          users: [],
+          pagination: {
+            page: Number(page),
+            limit: Number(limit),
+            total: 0,
+            pages: 0
+          }
+        }
+      });
+    }
+
+    const userZoneNames = currentUser.serviceZones.map(sz => sz.serviceZone.name);
+    
+    const where: any = {
+      OR: [
+        // Include all zone managers
+        { role: 'ZONE_MANAGER' },
+        // Include users from the same zones
+        {
+          serviceZones: {
+            some: {
+              serviceZone: {
+                name: { in: userZoneNames }
+              }
+            }
+          }
+        }
+      ]
+    };
+    
+    if (search) {
+      where.OR = [
+        ...where.OR,
+        { name: { contains: search as string, mode: 'insensitive' } },
+        { email: { contains: search as string, mode: 'insensitive' } },
+        { phone: { contains: search as string, mode: 'insensitive' } }
+      ];
+    }
+    
+    if (isActive !== undefined) {
+      where.isActive = isActive === 'true';
+    }
+
+    const [users, totalCount] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' },
+        include: {
+          serviceZones: {
+            include: {
+              serviceZone: { select: { name: true } }
+            }
+          },
+          createdOffers: {
+            select: {
+              id: true,
+              offerValue: true,
+              status: true
+            }
+          }
+        }
+      }),
+      prisma.user.count({ where })
+    ]);
+
+    const formattedUsers = users.map((user: any) => {
+      const userZones = user.serviceZones.map((sz: any) => sz.serviceZone.name);
+      const offerStats = user.createdOffers.reduce((acc: any, offer: any) => {
+        acc.count++;
+        acc.totalValue += offer.offerValue?.toNumber() || 0;
+        if (offer.status === 'WON') acc.wonCount++;
+        return acc;
+      }, { count: 0, totalValue: 0, wonCount: 0 });
+
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        zones: userZones,
+        isActive: user.isActive,
+        lastLogin: user.lastLoginAt,
+        createdAt: user.createdAt,
+        offersCount: offerStats.count,
+        totalValue: offerStats.totalValue,
+        winRate: offerStats.count > 0 ? Math.round((offerStats.wonCount / offerStats.count) * 100) : 0
+      };
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        users: formattedUsers,
+        pagination: {
+          page: Number(page),
+          limit: Number(limit),
+          total: totalCount,
+          pages: Math.ceil(totalCount / Number(limit))
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get zone users error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch zone users'
     });
   }
 };

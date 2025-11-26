@@ -226,8 +226,8 @@ export class UserController {
         }
       });
 
-      // If zone is provided and user is ZONE_USER, create zone assignment
-      if (zoneId && role === 'ZONE_USER') {
+      // If zone is provided and user is ZONE_USER or ZONE_MANAGER, create zone assignment
+      if (zoneId && (role === 'ZONE_USER' || role === 'ZONE_MANAGER')) {
         await prisma.servicePersonZone.create({
           data: {
             userId: user.id,
@@ -309,7 +309,7 @@ export class UserController {
       });
 
       // Handle zone update if provided
-      if (zoneId !== undefined && role === 'ZONE_USER') {
+      if (zoneId !== undefined && (role === 'ZONE_USER' || role === 'ZONE_MANAGER')) {
         // Remove existing zone assignments
         await prisma.servicePersonZone.deleteMany({
           where: { userId: user.id }
@@ -438,6 +438,74 @@ export class UserController {
       res.status(500).json({
         success: false,
         message: 'Failed to update user status'
+      });
+      return;
+    }
+  }
+
+  /**
+   * Change user password
+   */
+  static async changePassword(req: AuthRequest, res: Response) {
+    try {
+      const { userId } = req.params;
+      const { newPassword } = req.body;
+
+      // Validation
+      if (!newPassword) {
+        res.status(400).json({
+          success: false,
+          message: 'New password is required'
+        });
+        return;
+      }
+
+      if (newPassword.length < 6) {
+        res.status(400).json({
+          success: false,
+          message: 'Password must be at least 6 characters'
+        });
+        return;
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: parseInt(userId) }
+      });
+
+      if (!user) {
+        res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+        return;
+      }
+
+      // Hash new password
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      // Update password and increment token version to invalidate existing sessions
+      const tokenVersion = require('crypto').randomUUID();
+
+      const updatedUser = await prisma.user.update({
+        where: { id: parseInt(userId) },
+        data: {
+          password: hashedPassword,
+          tokenVersion: tokenVersion
+        }
+      });
+
+      logger.info(`Password changed for user: ${updatedUser.email} by admin ${req.user?.email}`);
+
+      res.json({
+        success: true,
+        message: 'Password changed successfully'
+      });
+      return;
+    } catch (error) {
+      logger.error('Change password error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to change password'
       });
       return;
     }

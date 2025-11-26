@@ -114,7 +114,7 @@ export default function EditAssetPage() {
       toast.success('Asset updated successfully');
       
       if (asset?.customer?.id) {
-        router.push(`/admin/customers/${asset.customer.id}`);
+        router.push(`/admin/assets?customerId=${asset.customer.id}`);
       } else {
         router.push(`/admin/assets/${id}`);
       }
@@ -161,7 +161,13 @@ export default function EditAssetPage() {
         <CardContent className="pt-6">
           <div className="space-y-6">
             <div className="flex items-center space-x-4">
-              <Button variant="ghost" size="icon" onClick={() => router.back()}>
+              <Button variant="ghost" size="icon" onClick={() => {
+                if (asset?.customer?.id) {
+                  router.push(`/admin/assets?customerId=${asset.customer.id}`);
+                } else {
+                  router.back();
+                }
+              }}>
                 <ArrowLeft className="h-5 w-5" />
               </Button>
               <div>
@@ -295,7 +301,13 @@ export default function EditAssetPage() {
                 <Button 
                   type="button" 
                   variant="outline" 
-                  onClick={() => router.back()}
+                  onClick={() => {
+                    if (asset?.customer?.id) {
+                      router.push(`/admin/assets?customerId=${asset.customer.id}`);
+                    } else {
+                      router.back();
+                    }
+                  }}
                 >
                   Cancel
                 </Button>

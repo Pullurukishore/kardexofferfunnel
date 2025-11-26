@@ -97,22 +97,31 @@ export const authService = {
 
   refreshToken: (): Promise<{ accessToken: string }> => {
     return new Promise((resolve, reject) => {
-      apiService.api.post<{ accessToken: string }>('/auth/refresh-token', {}, { withCredentials: true })
-        .then(response => {
-          if (response.data?.accessToken) {
-            resolve(response.data);
+      apiService.api
+        .post<{ accessToken: string; token?: string }>('/auth/refresh', {}, { withCredentials: true })
+        .then((response) => {
+          const token = response.data?.accessToken || (response.data as any)?.token;
+          if (token) {
+            resolve({ accessToken: token });
           } else {
             throw new Error('No access token in response');
           }
         })
-        .catch(error => {
+        .catch((error) => {
           if (typeof window !== 'undefined') {
             // Clear cookies
             document.cookie = 'accessToken=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
             document.cookie = 'token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
             document.cookie = 'refreshToken=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+            
+            // Prevent infinite redirect loops
             if (window.location.pathname !== '/auth/login') {
-              window.location.href = '/auth/login';
+              if (!sessionStorage.getItem('auth_redirect_pending')) {
+                sessionStorage.setItem('auth_redirect_pending', 'true');
+                setTimeout(() => {
+                  window.location.href = '/auth/login';
+                }, 100);
+              }
             }
           }
           reject(error);
