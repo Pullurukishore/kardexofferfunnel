@@ -13,8 +13,7 @@ import {
   Edit,
   Save,
   Upload,
-  X,
-  FileText
+  X
 } from 'lucide-react'
 import { apiService } from '@/services/api'
 import { toast } from 'sonner'
@@ -350,8 +349,24 @@ export default function QuoteGenerationPage() {
   const fetchOffer = useCallback(async () => {
     try {
       setLoading(true)
-      const response = await apiService.api.get(`/offers/${offerId}`)
-      const offerData: Offer = response.data.offer
+      console.log('🔍 Fetching offer with ID:', offerId)
+      
+      // Try admin endpoint first, fall back to zone endpoint if admin fails
+      let response;
+      try {
+        response = await apiService.getOfferForQuoteAdmin(parseInt(offerId))
+      } catch (error: any) {
+        if (error.response?.status === 403) {
+          // Zone manager accessing admin quote page - use zone endpoint
+          console.log('📍 Using zone quote endpoint for zone manager')
+          response = await apiService.getOfferForQuote(parseInt(offerId))
+        } else {
+          throw error;
+        }
+      }
+      
+      console.log('✅ Offer data received:', response)
+      const offerData: Offer = response.offer
       setOffer(offerData)
       
       // Map spare parts to items format
@@ -398,9 +413,18 @@ export default function QuoteGenerationPage() {
           department: offerData.department || offerData.location || ''
         }
       })
-    } catch (error) {
-      console.error('Failed to fetch offer:', error)
-      toast.error('Failed to load offer details')
+    } catch (error: any) {
+      console.error('❌ Failed to fetch offer:', error)
+      console.error('❌ Error response:', error.response?.data)
+      console.error('❌ Error status:', error.response?.status)
+      
+      if (error.response?.status === 403) {
+        toast.error('Access denied: You do not have permission to view this offer')
+      } else if (error.response?.status === 404) {
+        toast.error('Offer not found')
+      } else {
+        toast.error('Failed to load offer details')
+      }
     } finally {
       setLoading(false)
     }
@@ -427,164 +451,6 @@ export default function QuoteGenerationPage() {
     }
     setIsEditMode(prev => !prev)
   }, [isEditMode])
-
-  const handleExportWord = useCallback(async () => {
-    if (!offer) return
-
-    try {
-      toast.loading('Generating Word document with images...')
-
-      // Get the entire HTML content from the print area (includes all 11 pages)
-      const printContent = printRef.current
-      if (!printContent) {
-        toast.dismiss()
-        toast.error('Unable to generate document')
-        return
-      }
-
-      // Clone the content
-      const clonedContent = printContent.cloneNode(true) as HTMLElement
-      
-      // Convert all images to base64
-      const images = clonedContent.querySelectorAll('img')
-      const imagePromises = Array.from(images).map(async (img) => {
-        try {
-          const src = img.src
-          if (src && !src.startsWith('data:')) {
-            // Fetch the image and convert to base64
-            const response = await fetch(src)
-            const blob = await response.blob()
-            const base64 = await new Promise<string>((resolve) => {
-              const reader = new FileReader()
-              reader.onloadend = () => resolve(reader.result as string)
-              reader.readAsDataURL(blob)
-            })
-            img.src = base64
-          }
-        } catch (error) {
-          console.error('Failed to convert image:', error)
-          // Keep original src if conversion fails
-        }
-      })
-
-      // Wait for all images to be converted
-      await Promise.all(imagePromises)
-      
-      // Get all stylesheets from the page
-      const styles = Array.from(document.styleSheets)
-        .map(styleSheet => {
-          try {
-            return Array.from(styleSheet.cssRules)
-              .map(rule => rule.cssText)
-              .join('\n')
-          } catch (e) {
-            return ''
-          }
-        })
-        .join('\n')
-
-      // Create complete HTML document with all 11 pages
-      const htmlContent = `<!DOCTYPE html>
-<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-<head>
-  <meta charset="utf-8">
-  <title>Quotation - ${offer.offerReferenceNumber}</title>
-  <!--[if gte mso 9]>
-  <xml>
-    <w:WordDocument>
-      <w:View>Print</w:View>
-      <w:Zoom>100</w:Zoom>
-      <w:DoNotOptimizeForBrowser/>
-    </w:WordDocument>
-  </xml>
-  <![endif]-->
-  <style>
-    ${styles}
-    
-    @page {
-      size: A4;
-      margin: 20mm;
-    }
-    
-    body {
-      font-family: Arial, sans-serif;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
-    }
-    
-    .page {
-      page-break-after: always;
-      page-break-inside: avoid;
-    }
-    
-    .page:last-child {
-      page-break-after: avoid;
-    }
-    
-    .print\\:hidden {
-      display: none !important;
-    }
-    
-    img {
-      max-width: 100%;
-      height: auto;
-    }
-    
-    /* Table styling for Word */
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      mso-table-lspace: 0pt;
-      mso-table-rspace: 0pt;
-    }
-    
-    table td, table th {
-      border: 1px solid #000000;
-      padding: 8px;
-      mso-line-height-rule: exactly;
-    }
-    
-    table th {
-      background-color: #4472C4;
-      color: #ffffff;
-      font-weight: bold;
-    }
-    
-    .data-table {
-      border: 1px solid #000000;
-    }
-    
-    .data-table th {
-      background-color: #4472C4 !important;
-      color: #ffffff !important;
-    }
-  </style>
-</head>
-<body>
-  ${clonedContent.innerHTML}
-</body>
-</html>`
-
-      // Create a blob with HTML content that can be opened in Word
-      const blob = new Blob([htmlContent], { type: 'application/msword' })
-      const link = document.createElement('a')
-      const url = URL.createObjectURL(blob)
-      link.setAttribute('href', url)
-      link.setAttribute('download', `Quote_${offer.offerReferenceNumber}_${format(new Date(), 'yyyy-MM-dd')}.doc`)
-      link.style.visibility = 'hidden'
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(url)
-      
-      toast.dismiss()
-      toast.success('Word document exported successfully with all images!')
-    } catch (error) {
-      console.error('Error exporting Word document:', error)
-      toast.dismiss()
-      toast.error('Failed to export Word document')
-    }
-  }, [offer])
 
   // ==================== Computed Values ====================
   const quoteDate = useMemo(() => new Date(), [])
@@ -733,10 +599,6 @@ export default function QuoteGenerationPage() {
             <Button onClick={handleDownloadPDF} variant="outline" disabled={isEditMode}>
               <Download className="h-4 w-4 mr-2" />
               Download PDF
-            </Button>
-            <Button onClick={handleExportWord} variant="outline" disabled={isEditMode}>
-              <FileText className="h-4 w-4 mr-2" />
-              Export to Word
             </Button>
           </div>
         </div>

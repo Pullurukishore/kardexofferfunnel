@@ -9,6 +9,7 @@ export interface AuthRequest extends Request {
     email: string;
     role: string;
     zoneId?: string;
+    zoneIds?: string[];
   };
 }
 
@@ -91,7 +92,6 @@ export const authenticate = async (
             refreshToken: true,
             serviceZones: {
               select: { serviceZoneId: true },
-              take: 1,
             },
           },
         });
@@ -133,12 +133,14 @@ export const authenticate = async (
         res.cookie('accessToken', newAccessToken, cookieOptions);
         res.cookie('token', newAccessToken, cookieOptions);
         // Attach user to request
+        const zoneIds = user.serviceZones.map(sz => sz.serviceZoneId.toString());
         const zoneId = user.serviceZones[0]?.serviceZoneId?.toString();
         req.user = {
           id: user.id,
           email: user.email,
           role: user.role,
           zoneId: zoneId,
+          zoneIds: zoneIds,
         };
         return next();
       } catch (error) {
@@ -163,7 +165,6 @@ export const authenticate = async (
           tokenVersion: true,
           serviceZones: {
             select: { serviceZoneId: true },
-            take: 1,
           },
         },
       });
@@ -181,12 +182,14 @@ export const authenticate = async (
           code: 'TOKEN_VERSION_MISMATCH',
         });
       }
+      const zoneIds = user.serviceZones.map(sz => sz.serviceZoneId.toString());
       const zoneId = user.serviceZones[0]?.serviceZoneId?.toString();
       req.user = {
         id: user.id,
         email: user.email,
         role: user.role,
         zoneId: zoneId,
+        zoneIds: zoneIds,
       };
       return next();
     }

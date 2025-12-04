@@ -18,7 +18,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { UserRole } from "@/types";
 import {
   Menu,
-  User,
   LogOut,
   ChevronDown,
   Plus,
@@ -126,6 +125,20 @@ export function Navbar({ onMenuClick, collapsed = false }: NavbarProps) {
               <Menu className="h-5 w-5 text-slate-700" />
             </button>
 
+            {/* Project Name - Desktop */}
+            <div className="hidden lg:flex items-center">
+              <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                Offer Funnel
+              </h1>
+            </div>
+
+            {/* Project Name - Mobile/Tablet */}
+            <div className="lg:hidden flex items-center">
+              <h1 className="text-lg font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                Offer Funnel
+              </h1>
+            </div>
+
             {/* Breadcrumbs + Title */}
             <div className="hidden md:flex flex-col min-w-0">
               <div className="flex items-center gap-2 text-xs text-slate-500 truncate" aria-label="Breadcrumbs">
@@ -222,17 +235,6 @@ export function Navbar({ onMenuClick, collapsed = false }: NavbarProps) {
                       </div>
                     </div>
                   </div>
-                  
-                  <DropdownMenuSeparator className="my-2" />
-                  
-                  {/* Menu Items */}
-                  <DropdownMenuItem
-                    className="cursor-pointer px-3 py-2.5 rounded-xl hover:bg-blue-50 group"
-                    onClick={() => router.push("/profile")}
-                  >
-                    <User className="mr-3 h-4 w-4 text-slate-600 group-hover:text-blue-600 transition-colors" />
-                    <span className="font-medium">My Profile</span>
-                  </DropdownMenuItem>
                   
                   <DropdownMenuSeparator className="my-2" />
                   

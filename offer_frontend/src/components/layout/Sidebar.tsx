@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -30,7 +31,6 @@ import {
   Home,
   Zap,
   TrendingUp,
-  Gem,
 } from "lucide-react";
 
 type NavItem = {
@@ -478,54 +478,64 @@ export function Sidebar({
       animate={{ x: 0 }}
       suppressHydrationWarning
       className={cn(
-        "fixed left-0 top-0 z-[60] flex h-screen flex-col transition-all duration-300",
+        "fixed left-0 top-0 z-[60] flex h-screen flex-col bg-gradient-to-br from-white via-slate-50/80 to-blue-50/30 border-r border-slate-200/80 shadow-xl transition-all duration-300 ease-out",
+        // Mobile-first responsive design
         isMobile 
-          ? "w-72 bg-white shadow-2xl"
-          : collapsed ? "w-20 bg-white border-r border-slate-200" : "w-64 bg-white border-r border-slate-200",
+          ? "w-80" // Wider on mobile for better touch targets
+          : collapsed ? "w-20" : "w-64",
         className
       )}
       role="navigation"
       aria-label="Primary"
     >
-      {/* Header */}
+      {/* Clean accent elements */}
+      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 opacity-60"></div>
+      <div className="absolute inset-0 bg-gradient-to-b from-blue-500/[0.02] via-transparent to-transparent pointer-events-none"></div>
+      {/* Modern Header */}
       <div className={cn(
-        "relative flex items-center border-b border-slate-200 bg-gradient-to-r from-blue-50 via-purple-50 to-pink-50",
-        isMobile ? "h-16 px-4 justify-between" : collapsed ? "h-16 px-2 justify-center" : "h-16 px-4 justify-between"
+        "flex items-center justify-between border-b border-slate-200/50 bg-white/90 relative z-10 shadow-sm",
+        // Mobile-optimized header height and padding
+        isMobile ? "h-16 px-6" : "h-20 px-4"
       )}>
         {(!collapsed || isMobile) && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="flex items-center gap-3"
+            className="flex items-center justify-center w-full gap-3"
           >
-            <div className="relative">
-              <div className="h-10 w-10 bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                <Gem className="h-5 w-5 text-white" />
-              </div>
-            </div>
-            <div>
-              <h1 className="text-lg font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                Offer Funnel
-              </h1>
-              <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide" suppressHydrationWarning>
-                {hydrated
-                  ? (effectiveRole === UserRole.ADMIN
-                      ? 'Admin Panel'
-                      : effectiveRole === UserRole.ZONE_MANAGER
-                        ? 'Zone Manager'
-                        : 'Zone Panel')
-                  : 'Zone Panel'}
-              </p>
-            </div>
+            <Image 
+              src="/favicon-circle.svg" 
+              alt="Kardex Logo" 
+              width={isMobile ? 36 : 40} 
+              height={isMobile ? 36 : 40} 
+              className="rounded-lg transition-all duration-200 hover:scale-105"
+              priority
+            />
+            <Image 
+              src="/kardex.png" 
+              alt="Kardex" 
+              width={isMobile ? 200 : 240} 
+              height={isMobile ? 62 : 75} 
+              className="transition-all duration-200 hover:scale-105"
+              style={{ width: 'auto', height: 'auto' }}
+              priority
+            />
           </motion.div>
         )}
         
         {collapsed && !isMobile && (
           <motion.div 
             whileHover={{ scale: 1.1, rotate: 5 }}
-            className="h-9 w-9 bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg"
+            className="flex items-center justify-center w-full"
           >
-            <Gem className="h-5 w-5 text-white" />
+            <Image 
+              src="/favicon-circle.svg" 
+              alt="Kardex Logo" 
+              width={32} 
+              height={32} 
+              className="rounded-lg transition-all duration-200 hover:scale-105"
+              priority
+            />
           </motion.div>
         )}
 
@@ -569,70 +579,68 @@ export function Sidebar({
       </div>
 
       {/* Navigation Section */}
-      <ScrollArea className="flex-1 py-4 overflow-hidden">
-        <div suppressHydrationWarning className="h-full flex flex-col">
-          {/* Sticky Menu Label */}
-          {!collapsed && !isMobile && (
-            <div className="sticky top-0 z-10 px-4 mb-3 bg-white pb-2 border-b border-slate-100">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Menu</p>
-            </div>
+      <ScrollArea className={cn(
+        "flex-1",
+        isMobile ? "py-4" : "py-6"
+      )}>
+        <div suppressHydrationWarning>
+          {(!collapsed || isMobile) && (
+            <motion.nav 
+              suppressHydrationWarning
+              className={cn(
+                "space-y-1",
+                isMobile ? "px-6" : "px-4"
+              )}
+            >
+              {navItems}
+            </motion.nav>
           )}
-          
-          {/* Scrollable Navigation */}
-          <nav suppressHydrationWarning className="flex-1 overflow-y-auto pr-4">
-            <div data-hydration-anchor suppressHydrationWarning>
-              {hydrated ? navItems : null}
-            </div>
-          </nav>
         </div>
       </ScrollArea>
 
-      {/* Footer */}
+      {/* Logout section */}
       <div className={cn(
-        "border-t border-slate-200 bg-gradient-to-r from-slate-50 via-blue-50 to-purple-50",
-        isMobile ? "px-3 py-4" : collapsed ? "px-2 py-3" : "px-3 py-4"
+        "border-t border-slate-200/60 bg-white/90 relative z-10 shadow-sm",
+        isMobile ? "px-6 py-4" : collapsed ? "px-2 py-3" : "px-4 py-3"
       )}>
-        {/* Logout Button */}
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
+        <button
           onClick={() => logout?.()}
-          onMouseEnter={() => setHoveredItem('logout')}
-          onMouseLeave={() => setHoveredItem(null)}
+          aria-label="Logout"
           className={cn(
-            "group w-full flex items-center gap-3 transition-all duration-200 rounded-xl",
-            collapsed 
-              ? "justify-center px-2 py-3 hover:bg-red-50"
-              : "px-3 py-2.5 hover:bg-red-50",
-            "text-slate-700 hover:text-red-600"
+            "group w-full flex items-center rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:ring-offset-2 focus:ring-offset-transparent",
+            "hover:bg-red-50 hover:shadow-md text-slate-700 hover:text-red-700",
+            isMobile ? "px-3 py-3 text-base" : collapsed ? "px-2.5 py-2.5 text-sm justify-center" : "px-2.5 py-2.5 text-sm"
           )}
         >
+          {/* Icon with colored background */}
           <div className={cn(
-            "flex items-center justify-center rounded-lg transition-all",
-            collapsed ? "h-9 w-9" : "h-9 w-9",
-            "bg-red-50 group-hover:bg-red-100"
+            "flex-shrink-0 rounded-lg transition-all duration-200 flex items-center justify-center bg-red-50 group-hover:bg-red-100 group-hover:shadow-md group-hover:scale-105",
+            isMobile ? "h-10 w-10" : "h-9 w-9"
           )}>
-            <LogOut className="h-5 w-5 text-red-600 group-hover:scale-110 transition-transform" />
+            <LogOut className={cn(
+              "transition-all duration-200 text-red-600 group-hover:scale-110",
+              isMobile ? "h-5 w-5" : "h-4 w-4"
+            )} />
           </div>
           {(!collapsed || isMobile) && (
-            <span className="font-semibold text-sm">Logout</span>
+            <span className={cn(
+              "font-semibold",
+              isMobile ? "ml-3" : "ml-2.5"
+            )}>Logout</span>
           )}
-          
-          {/* Tooltip */}
-          {collapsed && !isMobile && hoveredItem === 'logout' && (
-            <motion.div
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -10 }}
-              className="absolute left-full ml-3 z-50 pointer-events-none"
+          {/* Tooltip when collapsed */}
+          {collapsed && !isMobile && (
+            <span
+              className={cn(
+                "pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-md bg-slate-900/95 px-2 py-1 text-xs font-medium text-white shadow-lg",
+                "opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150"
+              )}
+              role="tooltip"
             >
-              <div className="bg-slate-900 text-white px-3 py-2 rounded-lg text-sm font-medium shadow-xl whitespace-nowrap">
-                Logout
-                <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-slate-900" />
-              </div>
-            </motion.div>
+              Logout
+            </span>
           )}
-        </motion.button>
+        </button>
       </div>
     </motion.div>
   );

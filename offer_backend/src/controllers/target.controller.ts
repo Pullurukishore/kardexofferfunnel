@@ -751,16 +751,16 @@ export class TargetController {
           const variance = t.actualValue - displayTargetValue;
           const variancePercentage = displayTargetValue > 0 ? (variance / displayTargetValue) * 100 : 0;
           
-          // Calculate achievement percentage (user-specific only)
-          const achievement = displayTargetValue > 0 ? (t.actualValue / displayTargetValue) * 100 : 0;
-          const expectedAchievement = displayTargetValue > 0 ? (0 / displayTargetValue) * 100 : 0;
-          
           // Get comprehensive metrics for this user
           const metrics = await TargetController.getUserMetrics(
             t.userId,
             t.targetPeriod,
             t.periodType
           );
+          
+          // Calculate achievement percentage (user-specific only)
+          const achievement = displayTargetValue > 0 ? (t.actualValue / displayTargetValue) * 100 : 0;
+          const expectedAchievement = displayTargetValue > 0 ? (metrics.expectedOffers / displayTargetValue) * 100 : 0;
           
           return {
             id: t.id,

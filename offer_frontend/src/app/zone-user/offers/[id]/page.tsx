@@ -323,7 +323,7 @@ export default function OfferDetailPage() {
         <div className="text-center">
           <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
           <p className="text-gray-600">Offer not found</p>
-          <Button onClick={() => router.push('/zone-manager/offers')} className="mt-4">
+          <Button onClick={() => router.push('/zone-user/offers')} className="mt-4">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Go Back
           </Button>
@@ -342,7 +342,7 @@ export default function OfferDetailPage() {
           <Button
             variant="outline"
             size="icon"
-            onClick={() => router.push('/zone-manager/offers')}
+            onClick={() => router.push('/zone-user/offers')}
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -352,7 +352,7 @@ export default function OfferDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <Button onClick={() => router.push(`/zone-manager/offers/${offer.id}/edit`)}>
+          <Button onClick={() => router.push(`/zone-user/offers/${offer.id}/edit`)}>
             <Edit className="h-4 w-4 mr-2" />
             Edit Offer
           </Button>
@@ -851,7 +851,7 @@ export default function OfferDetailPage() {
                       This is an SPP (Spare Parts) offer. Add spare parts to complete the offer details.
                     </p>
                     <Button 
-                      onClick={() => router.push(`/zone-manager/offers/${offer.id}/edit`)}
+                      onClick={() => router.push(`/zone-user/offers/${offer.id}/edit`)}
                       className="bg-amber-600 hover:bg-amber-700"
                     >
                       <Wrench className="h-4 w-4 mr-2" />
@@ -1266,14 +1266,14 @@ export default function OfferDetailPage() {
               </Button>
               <Button 
                 className="w-full bg-white hover:bg-gray-50 text-gray-900 border-2 border-gray-300 hover:border-purple-500 shadow-md hover:shadow-lg transition-all font-semibold py-5"
-                onClick={() => router.push(`/zone-manager/offers/${params.id}/quote`)}
+                onClick={() => router.push(`/zone-user/offers/${params.id}/quote`)}
               >
                 <FileText className="h-4 w-4 mr-2 text-purple-600" />
                 Generate Quote
               </Button>
               <Button 
                 className="w-full bg-white hover:bg-gray-50 text-gray-900 border-2 border-gray-300 hover:border-indigo-500 shadow-md hover:shadow-lg transition-all font-semibold py-5"
-                onClick={() => router.push(`/zone-manager/offers/${params.id}/activity`)}
+                onClick={() => router.push(`/zone-user/offers/${params.id}/activity`)}
               >
                 <Clock className="h-4 w-4 mr-2 text-indigo-600" />
                 View Activity History

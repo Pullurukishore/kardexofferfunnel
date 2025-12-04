@@ -8,12 +8,14 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "start:production": "node start-production.js",
-    "seed": "ts-node scripts/seed.ts",
+    "seed": "node prisma/seed.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "import:excel": "node scripts/import-excel-data.js",
-    "analyze:excel": "node analyze-excel.js"
+    "analyze:excel": "node analyze-excel.js",
+    "setup:new": "node scripts/setup-new-database.js",
+    "validate:data": "node scripts/validate-integration.js"
   },
   "keywords": [
     "offer",

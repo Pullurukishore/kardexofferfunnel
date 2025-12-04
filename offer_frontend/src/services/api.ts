@@ -165,6 +165,16 @@ class ApiService {
     return response.data;
   }
 
+  async getOfferForQuote(id: number) {
+    const response = await this.api.get(`/offers/quote/zone/${id}`);
+    return response.data;
+  }
+
+  async getOfferForQuoteAdmin(id: number) {
+    const response = await this.api.get(`/offers/quote/admin/${id}`);
+    return response.data;
+  }
+
   async createOffer(data: any) {
     const response = await this.api.post('/offers', data);
     return response.data;
@@ -569,15 +579,15 @@ class ApiService {
   }
 
   async getZoneTargetDetails(zoneId: number, targetPeriod: string, periodType: string) {
-    const response = await this.api.get(`/reports/targets/${zoneId}`, {
-      params: { type: 'zone', targetPeriod, periodType }
+    const response = await this.api.get(`/targets/zones/${zoneId}/details`, {
+      params: { targetPeriod, periodType }
     });
     return response.data;
   }
 
   async getUserTargetDetails(userId: number, targetPeriod: string, periodType: string) {
-    const response = await this.api.get(`/reports/targets/${userId}`, {
-      params: { type: 'user', targetPeriod, periodType }
+    const response = await this.api.get(`/targets/users/${userId}/details`, {
+      params: { targetPeriod, periodType }
     });
     return response.data;
   }
@@ -613,6 +623,14 @@ class ApiService {
   async getForecastHighlights(params?: any) {
     const response = await this.api.get('/forecasts/highlights', { params });
     return response.data;
+  }
+
+  async exportForecastExcel(params?: any) {
+    const response = await this.api.get('/forecasts/export', {
+      params,
+      responseType: 'blob',
+    });
+    return response.data as Blob;
   }
 }
 

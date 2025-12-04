@@ -1,0 +1,10 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Circular background -->
+  <circle cx="32" cy="32" r="32" fill="#507295"/>
+  
+  <!-- Inner white circle for contrast -->
+  <circle cx="32" cy="32" r="26" fill="white"/>
+  
+  <!-- Kardex text - larger and centered -->
+  <text x="32" y="38" font-family="Arial, sans-serif" font-size="11" font-weight="bold" text-anchor="middle" fill="#507295">KARDEX</text>
+</svg>

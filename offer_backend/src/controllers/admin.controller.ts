@@ -100,7 +100,6 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
-    console.error('Dashboard stats error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch dashboard statistics'
@@ -225,7 +224,6 @@ export const getAllOffers = async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
-    console.error('Get offers error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch offers'
@@ -327,7 +325,6 @@ export const getAllUsers = async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
-    console.error('Get users error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch users'
@@ -383,7 +380,6 @@ export const createUser = async (req: Request, res: Response) => {
     });
     return;
   } catch (error) {
-    console.error('Create user error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to create user'
@@ -430,7 +426,6 @@ export const createZone = async (req: any, res: Response) => {
       }
     });
 
-    console.log(`Zone created: ${zone.name} by admin ${req.user?.email}`);
 
     return res.status(201).json({
       success: true,
@@ -444,7 +439,6 @@ export const createZone = async (req: any, res: Response) => {
       }
     });
   } catch (error) {
-    console.error('Create zone error:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to create zone'
@@ -494,7 +488,6 @@ export const updateZone = async (req: any, res: Response) => {
       }
     });
 
-    console.log(`Zone updated: ${updatedZone.name} by admin ${req.user?.email}`);
 
     return res.json({
       success: true,
@@ -508,7 +501,6 @@ export const updateZone = async (req: any, res: Response) => {
       }
     });
   } catch (error) {
-    console.error('Update zone error:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to update zone'
@@ -574,7 +566,6 @@ export const getAllZones = async (req: Request, res: Response) => {
       data: formattedZones
     });
   } catch (error) {
-    console.error('Get zones error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch zones'
@@ -716,7 +707,6 @@ export const getAnalytics = async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
-    console.error('Analytics error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch analytics data'
@@ -804,7 +794,6 @@ export const getActivityLogs = async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
-    console.error('Activity logs error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch activity logs'
@@ -939,7 +928,6 @@ export const getZoneUsers = async (req: AuthRequest, res: Response) => {
       }
     });
   } catch (error) {
-    console.error('Get zone users error:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch zone users'

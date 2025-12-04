@@ -23,9 +23,16 @@ function isRouteAccessible(pathname: string, role?: UserRole): boolean {
     return true;
   }
 
-  // Admin routes
+  // Admin routes - allow zone managers to access quote pages
   if (pathname.startsWith('/admin/')) {
-    return role === UserRole.ADMIN;
+    if (role === UserRole.ADMIN) {
+      return true;
+    }
+    // Allow zone managers to access quote pages
+    if (role === UserRole.ZONE_MANAGER && pathname.includes('/quote')) {
+      return true;
+    }
+    return false;
   }
 
   // Zone Manager routes

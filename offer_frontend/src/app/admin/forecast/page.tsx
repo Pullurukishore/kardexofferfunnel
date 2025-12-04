@@ -1,11 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, Fragment } from 'react';
 import { apiService } from '@/services/api';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Calendar, RefreshCw, Target, TrendingUp, Award, BarChart3, Loader2 } from 'lucide-react';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Calendar, RefreshCw, Loader2, Download, BarChart3, TrendingUp, MapPin, Package, Activity, Users } from 'lucide-react';
+import { ForecastSummaryCards } from '@/components/forecast/ForecastSummaryCards';
+import { ZonePerformanceChart } from '@/components/forecast/ZonePerformanceChart';
+import { MonthlyTrendChart } from '@/components/forecast/MonthlyTrendChart';
+import { ProductTypeAnalysis } from '@/components/forecast/ProductTypeAnalysis';
+import { UserPerformanceAnalytics } from '@/components/forecast/UserPerformanceAnalytics';
+import { EnhancedZonePerformanceAnalytics } from '@/components/forecast/EnhancedZonePerformanceAnalytics';
+import { ProductTypeAnalytics } from '@/components/forecast/ProductTypeAnalytics';
 
 type ZoneInfo = { id: number; name: string; shortForm: string };
 
@@ -20,8 +25,17 @@ type MonthlyRow = {
   byZone: Record<string, number>;
 };
 
-const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`;
+const inr = (n: number) => `₹${(n / 10000000).toFixed(2)}Cr`;
 const pct = (n: number) => `${n.toFixed(1)}%`;
+const ZONE_ORDER = ['WEST', 'SOUTH', 'NORTH', 'EAST'];
+const sortZones = (zones: ZoneInfo[]) => {
+  const sorted = [...zones].sort((a, b) => {
+    const aIdx = ZONE_ORDER.indexOf(a.name);
+    const bIdx = ZONE_ORDER.indexOf(b.name);
+    return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
+  });
+  return sorted;
+};
 
 const achClass = (v: number) =>
   v >= 100
@@ -37,118 +51,36 @@ const devClass = (v: number) => (v < 0 ? 'text-blue-700 bg-blue-50' : v > 0 ? 't
 export default function AdminForecastPage() {
   const [year, setYear] = useState<number>(new Date().getFullYear());
   const [loading, setLoading] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<string>('highlights');
+  const [downloading, setDownloading] = useState<boolean>(false);
   const [zones, setZones] = useState<ZoneInfo[]>([]);
   const [monthly, setMonthly] = useState<MonthlyRow[]>([]);
   const [totals, setTotals] = useState<any>(null);
   const [quarters, setQuarters] = useState<any[]>([]);
   const [productTotals, setProductTotals] = useState<{ productType: string; total: number }[]>([]);
-  const [breakdownZones, setBreakdownZones] = useState<any[]>([]);
-  const [poAgg, setPoAgg] = useState<any[]>([]);
-  const [poZoneTables, setPoZoneTables] = useState<any[]>([]);
-  const [highlights, setHighlights] = useState<{ rows: any[]; total: any; year?: number } | null>(null);
+  const [analytics, setAnalytics] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const load = async (y = year) => {
-    setLoading(true);
+  const load = async (y: number) => {
     try {
-      const [summaryRes, breakdownRes, poExpectedRes, highlightsRes] = await Promise.all([
+      setLoading(true);
+      setError(null);
+      const [summaryRes] = await Promise.all([
         apiService.getForecastSummary({ year: y }),
-        apiService.getForecastBreakdown({ year: y }),
-        apiService.getForecastPoExpected({ year: y }),
-        apiService.getForecastHighlights({ year: y }),
       ]);
-      const data = summaryRes?.data || summaryRes;
-      const breakdown = breakdownRes?.data || breakdownRes;
-      const poExp = poExpectedRes?.data || poExpectedRes;
-      const hl = (highlightsRes?.data || highlightsRes) || null;
-      const zonesList: ZoneInfo[] = data.zones || [];
-      const zoneNamesLocal = zonesList.map(z => z.name);
-      const monthlyData: MonthlyRow[] = data.monthly || [];
-      setZones(zonesList);
-      // Build full 12-month view with zeros for missing months; keep all zone columns
-      const monthlyIndex: Record<number, MonthlyRow> = {};
-      monthlyData.forEach(r => { monthlyIndex[r.month] = r; });
-      const fullMonthly: MonthlyRow[] = Array.from({ length: 12 }).map((_, i) => {
-        const m = i + 1;
-        const existing = monthlyIndex[m];
-        if (existing) {
-          // Ensure byZone has all zones (fill missing with 0)
-          const filledByZone: Record<string, number> = {};
-          zoneNamesLocal.forEach(zn => { filledByZone[zn] = Number(existing.byZone?.[zn] || 0); });
-          return { ...existing, byZone: filledByZone };
-        }
-        const emptyByZone: Record<string, number> = {};
-        zoneNamesLocal.forEach(zn => { emptyByZone[zn] = 0; });
-        return {
-          month: m,
-          monthName: MONTHS[i],
-          forecast: 0,
-          euro: 0,
-          mtdActual: 0,
-          variance: 0,
-          achievement: 0,
-          byZone: emptyByZone,
-        } as MonthlyRow;
-      });
-      setMonthly(fullMonthly);
-      setTotals(data.totals || null);
-      setQuarters(data.quarters || []);
-      setProductTotals(data.productTypeTotals || []);
-      // Merge breakdown with all zones (include empty zones)
-      const bdZones: any[] = [];
-      const bdIndex = new Map<number, any>((breakdown.zones || []).map((z: any) => [z.zoneId, z]));
-      for (const z of zonesList) {
-        const item = bdIndex.get(z.id) || {
-          zoneId: z.id,
-          zoneName: z.name,
-          users: [],
-          productTypes: [],
-          matrix: {},
-          totals: { byUser: {}, byProductType: {}, zoneTotal: 0 },
-        };
-        bdZones.push(item);
+      
+      if (summaryRes.success && summaryRes.data) {
+        setZones(summaryRes.data.zones || []);
+        setMonthly(summaryRes.data.monthly || []);
+        setTotals(summaryRes.data.totals || null);
+        setQuarters(summaryRes.data.quarters || []);
+        setProductTotals(summaryRes.data.productTypeTotals || []);
+        setAnalytics(summaryRes.data.analytics || null);
+      } else {
+        setError('Failed to load forecast data');
       }
-      setBreakdownZones(bdZones);
-      // Aggregated monthly PO expected from backend only
-      const agg = poExp?.aggregatedByMonth || {};
-      const poAggRows: any[] = [];
-      for (let i = 0; i < 12; i++) {
-        const mm = pad(i + 1);
-        const entry = agg[mm] || { byZone: {}, total: 0, euro: 0 };
-        const byZoneFilled: Record<string, number> = {};
-        zoneNamesLocal.forEach(zn => { byZoneFilled[zn] = Number(entry.byZone?.[zn] || 0); });
-        poAggRows.push({
-          monthName: MONTHS[i],
-          forecast: Number(entry.total || 0),
-          euro: Number(entry.euro || 0),
-          total: Number(entry.total || 0),
-          byZone: byZoneFilled,
-          startOfMonth: MONTHS[i],
-        });
-      }
-      setPoAgg(poAggRows);
-      // Build per-zone PO expected tables
-      const perZone = poExp?.perZone || {};
-      const zoneTables = zonesList.map((zone: ZoneInfo) => {
-        const z: any = perZone?.[(zone as any).id] || perZone?.[String((zone as any).id)] || { zoneId: zone.id, zoneName: zone.name, months: {} };
-        const userMap = new Map<number, string>();
-        Object.values(z.months || {}).forEach((m: any) => {
-          Object.values(m.users || {}).forEach((u: any) => userMap.set(u.userId, u.userName));
-        });
-        const users = Array.from(userMap.entries()).map(([id, name]) => ({ id, name }));
-        const rows = MONTHS.map((mn, idx) => {
-          const mm = pad(idx + 1);
-          const mrec = (z.months && z.months[mm]) || { users: {}, total: 0 };
-          const byUser: Record<number, number> = {};
-          users.forEach((u: any) => {
-            byUser[u.id] = Number((mrec.users?.[u.id]?.amount) || 0);
-          });
-          return { monthName: mn, byUser, total: Number(mrec.total || 0) };
-        });
-        return { zoneId: zone.id, zoneName: zone.name, users, rows };
-      });
-      setPoZoneTables(zoneTables);
-      setHighlights(hl);
+    } catch (err: any) {
+      console.error('Forecast load error:', err);
+      setError(err?.message || 'Failed to load forecast data');
     } finally {
       setLoading(false);
     }
@@ -163,397 +95,448 @@ export default function AdminForecastPage() {
     return [now - 1, now, now + 1];
   }, []);
 
+  const downloadExcel = async () => {
+    setDownloading(true);
+    try {
+      const blob = await apiService.exportForecastExcel({ year });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Forecast_${year}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const zoneNames = useMemo(() => zones.map(z => z.name), [zones]);
+  const quarterSummaries = useMemo(() => {
+    const defs = [
+      { label: 'Q1', months: [1, 2, 3] },
+      { label: 'Q2', months: [4, 5, 6] },
+      { label: 'Q3', months: [7, 8, 9] },
+      { label: 'Q4', months: [10, 11, 12] },
+    ];
+    return defs.map((q, idx) => {
+      const rows = monthly.filter(r => q.months.includes(r.month));
+      const forecast = rows.reduce((s, r) => s + (Number(r.forecast) || 0), 0);
+      const actual = rows.reduce((s, r) => s + (Number(r.mtdActual) || 0), 0);
+      const euro = rows.reduce((s, r) => s + (Number(r.euro) || 0), 0);
+      const variance = forecast - actual;
+      const achievement = forecast > 0 ? (actual / forecast) * 100 : 0;
+      const target = Number(quarters?.[idx]?.target || 0);
+      const devPercent = Number(quarters?.[idx]?.devPercent || 0);
+      return { label: q.label, endMonth: q.months[2], forecast, euro, actual, variance, achievement, target, devPercent };
+    });
+  }, [monthly, quarters]);
+  const yearSummary = useMemo(() => {
+    const forecast = monthly.reduce((s, r) => s + (Number(r.forecast) || 0), 0);
+    const actual = monthly.reduce((s, r) => s + (Number(r.mtdActual) || 0), 0);
+    const euro = monthly.reduce((s, r) => s + (Number(r.euro) || 0), 0);
+    const variance = forecast - actual;
+    const achievement = forecast > 0 ? (actual / forecast) * 100 : 0;
+    return { forecast, euro, actual, variance, achievement };
+  }, [monthly]);
 
   return (
-    <div className="p-6 space-y-6 relative">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="p-4 space-y-6 relative bg-gray-50 min-h-screen">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3 bg-white rounded-2xl p-6 shadow-lg border border-gray-200">
         <div>
-          <h1 className="text-2xl font-black tracking-tight">Forecast</h1>
-          <p className="text-sm text-slate-600">Admin overview of monthly forecast vs target and actuals</p>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 flex items-center gap-2">
+            <BarChart3 className="h-7 w-7 text-blue-600" />
+            Forecast Report {year}
+          </h1>
+          <p className="text-sm text-gray-600 mt-1">Comprehensive sales forecasting and performance analytics</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-white rounded-xl border px-3 py-2">
-            <Calendar className="w-4 h-4 text-blue-600" />
+          <div className="flex items-center gap-2 bg-white rounded-xl border-2 border-gray-200 px-4 py-3 shadow-sm">
+            <Calendar className="w-5 h-5 text-blue-600" />
             <select
               value={year}
               onChange={(e) => setYear(parseInt(e.target.value))}
-              className="bg-transparent text-sm font-semibold outline-none"
+              className="bg-transparent text-sm font-semibold outline-none text-gray-700"
             >
               {years.map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
           </div>
-          <Button onClick={() => load(year)} className="gap-2">
+          <Button onClick={() => load(year)} className="gap-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 shadow-lg">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
+          </Button>
+          <Button onClick={downloadExcel} className="gap-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 shadow-lg">
+            <Download className={`w-4 h-4 ${downloading ? 'animate-bounce' : ''}`} />
+            {downloading ? 'Downloading…' : 'Download Excel'}
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="rounded-2xl shadow-lg border-0 bg-gradient-to-br from-blue-50 to-blue-100">
-          <CardContent className="p-6 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-blue-700 uppercase tracking-widest">Annual Forecast</p>
-              <p className="text-3xl font-black text-blue-900 mt-2">{totals ? inr(totals.annualForecast) : '—'}</p>
-            </div>
-            <div className="p-3 rounded-xl bg-gradient-to-br from-blue-400 to-blue-600 shadow-lg">
-              <Target className="w-6 h-6 text-white" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl shadow-lg border-0 bg-gradient-to-br from-emerald-50 to-green-100">
-          <CardContent className="p-6 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-emerald-700 uppercase tracking-widest">Annual Actual</p>
-              <p className="text-3xl font-black text-emerald-900 mt-2">{totals ? inr(totals.annualActual) : '—'}</p>
-            </div>
-            <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-400 to-green-600 shadow-lg">
-              <BarChart3 className="w-6 h-6 text-white" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl shadow-lg border-0 bg-gradient-to-br from-indigo-50 to-purple-100">
-          <CardContent className="p-6 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-indigo-700 uppercase tracking-widest">Variance</p>
-              <p className="text-3xl font-black text-indigo-900 mt-2">{totals ? inr(totals.variance) : '—'}</p>
-            </div>
-            <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-400 to-purple-600 shadow-lg">
-              <TrendingUp className="w-6 h-6 text-white" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl shadow-lg border-0">
-          <CardContent className="p-6 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-slate-700 uppercase tracking-widest">Achievement</p>
-              <p className={`text-3xl font-black mt-2 ${totals ? (totals.achievement >= 100 ? 'text-emerald-700' : totals.achievement >= 80 ? 'text-amber-700' : 'text-rose-700') : ''}`}>{totals ? pct(totals.achievement) : '—'}</p>
-            </div>
-            <div className={`p-3 rounded-xl shadow-lg ${totals ? (totals.achievement >= 100 ? 'bg-emerald-100' : totals.achievement >= 80 ? 'bg-amber-100' : 'bg-rose-100') : 'bg-slate-100'}`}>
-              <Award className={`w-6 h-6 ${totals ? (totals.achievement >= 100 ? 'text-emerald-700' : totals.achievement >= 80 ? 'text-amber-700' : 'text-rose-700') : 'text-slate-600'}`} />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="rounded-xl bg-gradient-to-r from-slate-100 to-slate-50 p-1 shadow-md border border-slate-200">
-          <TabsTrigger value="highlights" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-amber-500 data-[state=active]:to-orange-500 data-[state=active]:text-white rounded-lg transition-all">
-            🎯 Highlights
-          </TabsTrigger>
-          <TabsTrigger value="monthly" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-cyan-500 data-[state=active]:text-white rounded-lg transition-all">
-            📅 Monthly
-          </TabsTrigger>
-          <TabsTrigger value="po-agg" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-pink-500 data-[state=active]:text-white rounded-lg transition-all">
-            📊 PO Agg
-          </TabsTrigger>
-          <TabsTrigger value="po-zone" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-500 data-[state=active]:to-emerald-500 data-[state=active]:text-white rounded-lg transition-all">
-            🗺️ PO Zones
-          </TabsTrigger>
-          <TabsTrigger value="breakdown" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-500 data-[state=active]:to-blue-500 data-[state=active]:text-white rounded-lg transition-all">
-            👥 Zone×User×Product
-          </TabsTrigger>
-          <TabsTrigger value="totals" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-rose-500 data-[state=active]:to-red-500 data-[state=active]:text-white rounded-lg transition-all">
-            📦 Product Totals
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
-
+      {/* Loading State */}
       {loading && (
-        <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center z-50 rounded-xl">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600 mr-3" />
+          <span className="text-lg font-medium text-gray-700">Loading forecast data...</span>
         </div>
       )}
 
-      {activeTab === 'highlights' && highlights && (
-        <Card className="rounded-2xl shadow-xl border-0">
-          <CardHeader className="bg-gradient-to-r from-slate-50 to-white border-b">
-            <CardTitle className="text-lg">Offers Highlights</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
+      {/* Error State */}
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-800 px-4 py-3 rounded-xl">
+          <p className="font-medium">Error: {error}</p>
+        </div>
+      )}
+
+      {/* Success State */}
+      {!loading && !error && analytics && (
+        <div className="space-y-8">
+          {/* Executive Summary Dashboard */}
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <BarChart3 className="h-6 w-6 text-blue-600" />
+              <h2 className="text-2xl font-bold text-gray-900">Executive Summary</h2>
+            </div>
+            
+            {/* Key Performance Indicators */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+              <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4 border border-blue-200">
+                <div className="flex items-center justify-between mb-2">
+                  <BarChart3 className="h-5 w-5 text-blue-600" />
+                  <span className="text-sm font-bold text-blue-800">Total Offers</span>
+                </div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {analytics.zonePerformance?.reduce((sum: number, zone: any) => sum + (zone.forecastOffers || 0), 0) || 0}
+                </div>
+                <div className="text-sm text-gray-600 mt-1">Across all zones</div>
+              </div>
+              
+              <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-xl p-4 border border-emerald-200">
+                <div className="flex items-center justify-between mb-2">
+                  <TrendingUp className="h-5 w-5 text-emerald-600" />
+                  <span className="text-sm font-bold text-emerald-800">Total Value</span>
+                </div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {inr(analytics.zonePerformance?.reduce((sum: number, zone: any) => sum + (zone.forecastValue || 0), 0) || 0)}
+                </div>
+                <div className="text-sm text-gray-600 mt-1">Forecast value</div>
+              </div>
+              
+              <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-4 border border-purple-200">
+                <div className="flex items-center justify-between mb-2">
+                  <Activity className="h-5 w-5 text-purple-600" />
+                  <span className="text-sm font-bold text-purple-800">Achievement</span>
+                </div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {analytics.zonePerformance?.length > 0 
+                    ? (analytics.zonePerformance.reduce((sum: number, zone: any) => sum + zone.achievement, 0) / analytics.zonePerformance.length).toFixed(1)
+                    : '0.0'}%
+                </div>
+                <div className="text-sm text-gray-600 mt-1">Average achievement</div>
+              </div>
+              
+              <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl p-4 border border-amber-200">
+                <div className="flex items-center justify-between mb-2">
+                  <Package className="h-5 w-5 text-amber-600" />
+                  <span className="text-sm font-bold text-amber-800">Balance BU</span>
+                </div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {inr(analytics.zonePerformance?.reduce((sum: number, zone: any) => {
+                    const buForBooking = (zone.forecastValue || 0) * 1.2;
+                    const actualValue = zone.actualValue || 0;
+                    return sum + Math.max(0, buForBooking - actualValue);
+                  }, 0) || 0)}
+                </div>
+                <div className="text-sm text-gray-600 mt-1">Remaining to target</div>
+              </div>
+            </div>
+
+            {/* Zone Performance Overview */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {analytics.zonePerformance?.map((zone: any, index: number) => (
+                <div key={zone.zoneName} className="bg-white border-2 border-gray-300 rounded-lg p-4 hover:shadow-md transition-shadow">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-lg font-bold text-gray-800">{zone.zoneName}</span>
+                    <div className={`w-3 h-3 rounded-full ${
+                      zone.achievement >= 100 ? 'bg-green-500' : 
+                      zone.achievement >= 80 ? 'bg-amber-500' : 'bg-red-500'
+                    }`}></div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Offers:</span>
+                      <span className="font-bold text-blue-600">{zone.forecastOffers || 0}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Value:</span>
+                      <span className="font-bold text-blue-600">{inr(zone.forecastValue)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Achievement:</span>
+                      <span className={`font-bold ${
+                        zone.achievement >= 100 ? 'text-green-600' : 
+                        zone.achievement >= 80 ? 'text-amber-600' : 'text-red-600'
+                      }`}>
+                        {zone.achievement.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Balance:</span>
+                      <span className="font-bold text-indigo-600">
+                        {inr(Math.max(0, (zone.forecastValue * 1.2) - zone.actualValue))}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Comprehensive Performance Table */}
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <TrendingUp className="h-6 w-6 text-amber-600" />
+                <h2 className="text-2xl font-bold text-gray-900">Performance Overview</h2>
+              </div>
+              <div className="flex gap-2">
+                <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                  ≥100% Excellent
+                </span>
+                <span className="px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-medium">
+                  80-99% Good
+                </span>
+                <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium">
+                  &lt;80% Needs Attention
+                </span>
+              </div>
+            </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50 sticky top-0 z-10">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-widest sticky left-0 bg-slate-50 z-20">Zone</th>
-                    <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-widest">No. of Offers</th>
-                    <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-widest">Offers Value</th>
-                    <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-widest">Orders Received</th>
-                    <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-widest">Open Funnel</th>
-                    <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-widest">Order Booking</th>
-                    <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-widest">BU for Booking / {year}</th>
-                    <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-widest">%</th>
-                    <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-widest">Balance BU</th>
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="bg-gray-100 border-b-2 border-gray-300">
+                    <th className="text-left py-3 px-4 font-bold text-gray-800 border border-gray-300">Zone</th>
+                    <th className="text-right py-3 px-4 font-bold text-gray-800 border border-gray-300">Offers</th>
+                    <th className="text-right py-3 px-4 font-bold text-gray-800 border border-gray-300">Forecast Value</th>
+                    <th className="text-right py-3 px-4 font-bold text-gray-800 border border-gray-300">Orders Received</th>
+                    <th className="text-right py-3 px-4 font-bold text-gray-800 border border-gray-300">Open Funnel</th>
+                    <th className="text-right py-3 px-4 font-bold text-gray-800 border border-gray-300">BU Target</th>
+                    <th className="text-right py-3 px-4 font-bold text-gray-800 border border-gray-300">Achievement %</th>
+                    <th className="text-right py-3 px-4 font-bold text-gray-800 border border-gray-300">Balance BU</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-slate-100">
-                  {highlights.rows?.map((r, idx) => (
-                    <tr key={r.zoneId} className={`hover:bg-amber-50/30 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
-                      <td className="px-4 py-2 text-sm font-semibold text-slate-800 sticky left-0 bg-white z-10">{r.zoneName}</td>
-                      <td className="px-4 py-2 text-right text-sm">{r.numOffers || 0}</td>
-                      <td className="px-4 py-2 text-right text-sm font-bold">{inr(r.offersValue || 0)}</td>
-                      <td className="px-4 py-2 text-right text-sm">{inr(r.ordersReceived || 0)}</td>
-                      <td className="px-4 py-2 text-right text-sm">{inr(r.openFunnel || 0)}</td>
-                      <td className="px-4 py-2 text-right text-sm">{inr(r.orderBooking || 0)}</td>
-                      <td className="px-4 py-2 text-right text-sm">{inr(r.buYear || 0)}</td>
-                      <td className="px-4 py-2 text-right">
-                        <span className={`px-2 py-1 rounded-lg text-xs font-bold ${devClass(r.devPercent || 0)}`}>{(r.devPercent || 0).toFixed(0)}%</span>
+                <tbody>
+                  {analytics.zonePerformance?.map((zone: any, zoneIndex: number) => (
+                    <tr key={`${zone.zoneName}-${zoneIndex}`} className="border border-gray-300 hover:bg-gray-50">
+                      <td className="py-3 px-4 font-medium text-gray-900 border border-gray-300">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${
+                            zone.achievement >= 100 ? 'bg-green-500' : 
+                            zone.achievement >= 80 ? 'bg-amber-500' : 'bg-red-500'
+                          }`}></div>
+                          {zone.zoneName}
+                        </div>
                       </td>
-                      <td className="px-4 py-2 text-right text-sm font-bold">{inr(r.balanceBu || 0)}</td>
+                      <td className="text-right py-3 px-4 font-medium text-blue-600 border border-gray-300">
+                        {zone.forecastOffers || 0}
+                      </td>
+                      <td className="text-right py-3 px-4 font-medium text-blue-600 border border-gray-300">
+                        {inr(zone.forecastValue)}
+                      </td>
+                      <td className="text-right py-3 px-4 font-medium text-green-600 border border-gray-300">
+                        {inr(zone.actualValue)}
+                      </td>
+                      <td className="text-right py-3 px-4 font-medium text-amber-600 border border-gray-300">
+                        {inr(zone.forecastValue - zone.actualValue)}
+                      </td>
+                      <td className="text-right py-3 px-4 font-medium text-gray-900 border border-gray-300">
+                        {inr(zone.forecastValue * 1.2)}
+                      </td>
+                      <td className="text-right py-3 px-4 border border-gray-300">
+                        <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
+                          zone.achievement >= 100 ? 'text-green-700 bg-green-50' : 
+                          zone.achievement >= 80 ? 'text-amber-700 bg-amber-50' : 'text-red-700 bg-red-50'
+                        }`}>
+                          {zone.achievement.toFixed(1)}%
+                        </span>
+                      </td>
+                      <td className="text-right py-3 px-4 font-medium text-indigo-600 border border-gray-300">
+                        {inr(Math.max(0, (zone.forecastValue * 1.2) - zone.actualValue))}
+                      </td>
                     </tr>
                   ))}
-                  {highlights.total && (
-                    <tr className="bg-slate-50">
-                      <td className="px-4 py-2 text-sm font-bold uppercase tracking-wide">Total</td>
-                      <td className="px-4 py-2 text-right text-sm font-bold">{highlights.total.numOffers || 0}</td>
-                      <td className="px-4 py-2 text-right text-sm font-bold">{inr(highlights.total.offersValue || 0)}</td>
-                      <td className="px-4 py-2 text-right text-sm font-bold">{inr(highlights.total.ordersReceived || 0)}</td>
-                      <td className="px-4 py-2 text-right text-sm font-bold">{inr(highlights.total.openFunnel || 0)}</td>
-                      <td className="px-4 py-2 text-right text-sm font-bold">{inr(highlights.total.orderBooking || 0)}</td>
-                      <td className="px-4 py-2 text-right text-sm font-bold">{inr(highlights.total.buYear || 0)}</td>
-                      <td className="px-4 py-2 text-right">
-                        <span className={`px-2 py-1 rounded-lg text-xs font-bold ${devClass(highlights.total.devPercent || 0)}`}>{(highlights.total.devPercent || 0).toFixed(0)}%</span>
-                      </td>
-                      <td className="px-4 py-2 text-right text-sm font-black text-indigo-700">{inr(highlights.total.balanceBu || 0)}</td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
 
-      {activeTab === 'highlights' && (
-      <Card className="rounded-2xl shadow-xl border-0">
-        <CardHeader className="bg-gradient-to-r from-slate-50 to-white border-b">
-          <CardTitle className="text-lg">Quarter Overview</CardTitle>
-        </CardHeader>
-        <CardContent className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {quarters.map((q) => (
-              <div key={q.quarter} className="rounded-xl p-4 border bg-white">
-                <div className="text-xs font-semibold text-slate-600 uppercase">{q.quarter}</div>
-                <div className="mt-2 text-sm text-slate-600">Target</div>
-                <div className="text-xl font-bold">{inr(q.target || 0)}</div>
-                <div className="mt-1 text-sm text-slate-600">Forecast</div>
-                <div className="text-xl font-bold">{inr(q.forecast || 0)}</div>
-                <div className={`mt-3 inline-flex items-center px-2 py-1 rounded-lg text-xs font-bold ${achClass(100 + (q.devPercent || 0))}`}>
-                  Dev {q.devPercent ? q.devPercent.toFixed(1) : '0.0'}%
-                </div>
+          {/* Quarterly & Product Analysis Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Quarterly Analysis */}
+            <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <Activity className="h-6 w-6 text-purple-600" />
+                <h2 className="text-xl font-bold text-gray-900">Quarterly Analysis</h2>
               </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-      )}
-
-      {/* PO Expected — Per Zone Tables */}
-      {activeTab === 'po-zone' && poZoneTables.length > 0 && (
-        <div className="space-y-6">
-          {poZoneTables.map((z) => (
-            <Card key={`pozone-${z.zoneId}`} className="rounded-2xl shadow-xl border-0 overflow-hidden">
-              <CardHeader className="bg-gradient-to-r from-slate-50 to-white border-b">
-                <CardTitle className="text-lg">PO Expected Month — {z.zoneName}</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-slate-200">
-                    <thead className="bg-slate-50 sticky top-0 z-10">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-widest sticky left-0 bg-slate-50 z-20">Month</th>
-                        {(z.users && z.users.length ? z.users : [{ id: 0, name: 'N/A' }]).map((u: any) => (
-                          <th key={`poz-${z.zoneId}-u-${u.id}`} className="px-6 py-3 text-right text-xs font-bold uppercase tracking-widest">{(u.name && String(u.name).trim()) ? u.name : 'N/A'}</th>
-                        ))}
-                        <th className="px-6 py-3 text-right text-xs font-bold uppercase tracking-widest">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-slate-100">
-                      {z.rows.map((r: any, idx: number) => (
-                        <tr key={`pozrow-${z.zoneId}-${idx}`} className={`hover:bg-blue-50/30 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
-                          <td className="px-6 py-3 text-sm font-semibold text-slate-800 sticky left-0 bg-white z-10">{r.monthName}</td>
-                          {(z.users && z.users.length ? z.users : [{ id: 0, name: 'N/A' }]).map((u: any) => (
-                            <td key={`pozcell-${z.zoneId}-${idx}-${u.id}`} className="px-6 py-3 text-right text-sm">{inr(r.byUser?.[u.id] || 0)}</td>
-                          ))}
-                          <td className="px-6 py-3 text-right text-sm font-bold">{inr(r.total)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {activeTab === 'monthly' && (
-      <Card className="rounded-2xl shadow-2xl border-0 overflow-hidden">
-        <CardHeader className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-          <CardTitle className="text-lg">Monthly Forecast by Zone</CardTitle>
-        </CardHeader>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200">
-            <thead className="bg-slate-50 sticky top-0 z-10">
-              <tr>
-                <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-widest sticky left-0 bg-slate-50 z-20">Month</th>
-                {zoneNames.map((zn) => (
-                  <th key={zn} className="px-6 py-4 text-right text-xs font-bold uppercase tracking-widest">{zn}</th>
-                ))}
-                <th className="px-6 py-4 text-right text-xs font-bold uppercase tracking-widest">Total</th>
-                <th className="px-6 py-4 text-right text-xs font-bold uppercase tracking-widest">Offers Count</th>
-                <th className="px-6 py-4 text-right text-xs font-bold uppercase tracking-widest">MTD Actual</th>
-                <th className="px-6 py-4 text-right text-xs font-bold uppercase tracking-widest">Variance</th>
-                <th className="px-6 py-4 text-right text-xs font-bold uppercase tracking-widest">Ach%</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-slate-100">
-              {monthly.map((row, idx) => (
-                <tr key={row.month} className={`hover:bg-blue-50/40 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
-                  <td className="px-6 py-3 text-sm font-semibold text-slate-800 sticky left-0 bg-white z-10">{row.monthName}</td>
-                  {zoneNames.map((zn) => (
-                    <td key={zn} className="px-6 py-3 text-right text-sm font-bold text-slate-800">{inr(row.byZone?.[zn] || 0)}</td>
-                  ))}
-                  <td className="px-6 py-3 text-right text-sm font-bold text-indigo-700">{inr(row.forecast)}</td>
-                  <td className="px-6 py-3 text-right text-sm text-slate-700">{row.euro}</td>
-                  <td className="px-6 py-3 text-right text-sm font-bold text-emerald-700">{inr(row.mtdActual)}</td>
-                  <td className="px-6 py-3 text-right text-sm font-bold text-indigo-700">{inr(row.variance)}</td>
-                  <td className="px-6 py-3 text-right">
-                    <span className={`px-2 py-1 rounded-lg text-xs font-bold ${achClass(row.achievement)}`}>{pct(row.achievement)}</span>
-                    <div className="mt-1 w-24 h-1.5 bg-slate-200 rounded-full ml-auto overflow-hidden">
-                      <div
-                        className={`${row.achievement >= 100 ? 'bg-emerald-500' : row.achievement >= 80 ? 'bg-amber-500' : 'bg-rose-500'} h-full`}
-                        style={{ width: `${Math.max(0, Math.min(100, row.achievement))}%` }}
-                      />
+              <div className="space-y-4">
+                {['Q1', 'Q2'].map((quarter, index) => (
+                  <div key={quarter} className="bg-white border-2 border-gray-300 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <h3 className="text-lg font-bold text-gray-800">{quarter}</h3>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        (analytics.quarterlyBreakdown?.[index]?.achievement || 0) >= 100 ? 'bg-green-100 text-green-800' :
+                        'bg-amber-100 text-amber-800'
+                      }`}>
+                        {((analytics.quarterlyBreakdown?.[index]?.achievement || 0) - 100).toFixed(1)}% Dev
+                      </span>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-      )}
-
-      {activeTab === 'totals' && (
-      <Card className="rounded-2xl shadow-xl border-0">
-        <CardHeader className="bg-gradient-to-r from-slate-50 to-white border-b">
-          <CardTitle className="text-lg">Total of All Zones by Product Type</CardTitle>
-        </CardHeader>
-        <CardContent className="p-6">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200">
-              <thead>
-                <tr className="bg-slate-50">
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-widest sticky left-0 bg-slate-50 z-20">Product Type</th>
-                  <th className="px-6 py-3 text-right text-xs font-bold uppercase tracking-widest">Total</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-slate-100">
-                {productTotals.map((p, idx) => (
-                  <tr key={p.productType} className={`hover:bg-indigo-50/40 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
-                    <td className="px-6 py-3 text-sm font-semibold text-slate-800 sticky left-0 bg-white z-10">{p.productType}</td>
-                    <td className="px-6 py-3 text-right text-sm font-bold text-slate-800">{inr(p.total || 0)}</td>
-                  </tr>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600">Forecast:</span>
+                        <div className="font-bold text-blue-600">
+                          {inr(analytics.quarterlyBreakdown?.[index]?.forecastValue || 0)}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">BU Target:</span>
+                        <div className="font-bold text-gray-900">
+                          {inr((analytics.quarterlyBreakdown?.[index]?.forecastValue || 0) * 1.2)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-      )}
+              </div>
+            </div>
 
-      {/* Zone → User × Product Type Grids */}
-      {activeTab === 'breakdown' && breakdownZones.length > 0 && (
-        <div className="space-y-6">
-          {breakdownZones.map((z) => (
-            <Card key={z.zoneId} className="rounded-2xl shadow-xl border-0 overflow-hidden">
-              <CardHeader className="bg-gradient-to-r from-slate-50 to-white border-b">
-                <CardTitle className="text-lg">{z.zoneName} — User × Product Type</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-slate-200">
-                    <thead className="bg-slate-50 sticky top-0 z-10">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-widest sticky left-0 bg-slate-50 z-20">Product Type</th>
-                        {(z.users && z.users.length ? z.users : [{ id: 0, name: 'N/A' }]).map((u: any) => (
-                          <th key={u.id} className="px-4 py-3 text-right text-xs font-bold uppercase tracking-widest">{(u.name && String(u.name).trim()) ? u.name : 'N/A'}</th>
-                        ))}
-                        <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-widest">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-slate-100">
-                      {z.productTypes.map((pt: string, idx: number) => (
-                        <tr key={pt} className={`hover:bg-blue-50/30 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
-                          <td className="px-4 py-2 text-sm font-semibold text-slate-800 sticky left-0 bg-white z-10">{pt}</td>
-                          {(z.users && z.users.length ? z.users : [{ id: 0, name: 'N/A' }]).map((u: any) => (
-                            <td key={`${pt}-${u.id}`} className="px-4 py-2 text-right text-sm">{inr((z.matrix?.[pt]?.[u.id] || 0))}</td>
-                          ))}
-                          <td className="px-4 py-2 text-right text-sm font-bold">{inr(z.totals?.byProductType?.[pt] || 0)}</td>
-                        </tr>
-                      ))}
-                      <tr className="bg-slate-50">
-                        <td className="px-4 py-2 text-sm font-bold uppercase tracking-wide">Total</td>
-                        {(z.users && z.users.length ? z.users : [{ id: 0, name: 'N/A' }]).map((u: any) => (
-                          <td key={`total-${u.id}`} className="px-4 py-2 text-right text-sm font-bold">{inr(z.totals?.byUser?.[u.id] || 0)}</td>
-                        ))}
-                        <td className="px-4 py-2 text-right text-sm font-black text-indigo-700">{inr(z.totals?.zoneTotal || 0)}</td>
-                      </tr>
-                    </tbody>
-                  </table>
+            {/* Product Type Performance */}
+            <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <Package className="h-6 w-6 text-orange-600" />
+                <h2 className="text-xl font-bold text-gray-900">Product Types</h2>
+              </div>
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {Object.entries(analytics.forecastByProductType || {})
+                  .sort(([,a], [,b]) => (b as any).value - (a as any).value)
+                  .slice(0, 6)
+                  .map(([productType, data]: [string, any], index: number) => (
+                  <div key={productType} className="bg-white border border-gray-200 rounded-lg p-3 hover:bg-gray-50">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className="text-sm font-bold text-gray-800">{productType}</span>
+                        <div className="text-xs text-gray-500">
+                          {(data as any).count || 0} offers
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-bold text-blue-600">
+                          {inr((data as any).value)}
+                        </div>
+                        <div className="text-xs text-green-600">
+                          {inr(analytics.actualByProductType?.[productType]?.value || 0)} actual
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* User Performance Highlights */}
+          {analytics.userPerformance && (
+            <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <Users className="h-6 w-6 text-green-600" />
+                <h2 className="text-2xl font-bold text-gray-900">Top Performers</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {analytics.userPerformance
+                  .sort((a: any, b: any) => b.achievement - a.achievement)
+                  .slice(0, 6)
+                  .map((user: any, index: number) => (
+                  <div key={user.userName} className="bg-white border-2 border-gray-300 rounded-lg p-4 hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-bold text-gray-800">{user.userName}</span>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        user.achievement >= 100 ? 'bg-green-100 text-green-800' :
+                        user.achievement >= 80 ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
+                      }`}>
+                        #{index + 1}
+                      </span>
+                    </div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Zone:</span>
+                        <span className="font-bold text-gray-900">{user.zoneName}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Achievement:</span>
+                        <span className={`font-bold ${
+                          user.achievement >= 100 ? 'text-green-600' : 'text-amber-600'
+                        }`}>
+                          {user.achievement.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Value:</span>
+                        <span className="font-bold text-blue-600">{inr(user.forecastValue)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Advanced Analytics Charts */}
+          <div className="space-y-6">
+            <div className="flex items-center gap-3 mb-6">
+              <BarChart3 className="h-6 w-6 text-blue-600" />
+              <h2 className="text-2xl font-bold text-gray-900">Advanced Analytics</h2>
+            </div>
+            
+            {/* Charts Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {analytics.zonePerformance && (
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-800 mb-4">Zone Performance Trends</h3>
+                    <ZonePerformanceChart zonePerformance={analytics.zonePerformance} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-800 mb-4">Enhanced Zone Analytics</h3>
+                    <EnhancedZonePerformanceAnalytics zonePerformance={analytics.zonePerformance} />
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* PO Expected — Aggregated Monthly */}
-      {activeTab === 'po-agg' && (
-      <Card className="rounded-2xl shadow-xl border-0">
-        <CardHeader className="bg-gradient-to-r from-slate-50 to-white border-b">
-          <CardTitle className="text-lg">PO Expected — Aggregated Monthly</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200">
-              <thead className="bg-slate-50 sticky top-0 z-10">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-widest sticky left-0 bg-slate-50 z-20">Month</th>
-                  <th className="px-6 py-3 text-right text-xs font-bold uppercase tracking-widest">Forecast</th>
-                  <th className="px-6 py-3 text-right text-xs font-bold uppercase tracking-widest">Offers Count</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold uppercase tracking-widest">Start of the Month</th>
-                  <th className="px-6 py-3 text-right text-xs font-bold uppercase tracking-widest">Total</th>
-                  {zoneNames.map((zn) => (
-                    <th key={`po-agg-${zn}`} className="px-6 py-3 text-right text-xs font-bold uppercase tracking-widest">{zn}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-slate-100">
-                {poAgg.map((r, idx) => (
-                  <tr key={idx} className={`hover:bg-indigo-50/30 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
-                    <td className="px-6 py-3 text-sm font-semibold text-slate-800 sticky left-0 bg-white z-10">{r.monthName}</td>
-                    <td className="px-6 py-3 text-right text-sm font-bold text-indigo-700">{inr(r.forecast)}</td>
-                    <td className="px-6 py-3 text-right text-sm">{r.euro}</td>
-                    <td className="px-6 py-3 text-left text-sm text-slate-600">{r.startOfMonth}</td>
-                    <td className="px-6 py-3 text-right text-sm font-bold">{inr(r.total)}</td>
-                    {zoneNames.map((zn) => (
-                      <td key={`po-agg-cell-${idx}-${zn}`} className="px-6 py-3 text-right text-sm">{inr(r.byZone?.[zn] || 0)}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              )}
+              
+              <div className="space-y-6">
+                {analytics.userPerformance && (
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-800 mb-4">User Performance Analysis</h3>
+                    <UserPerformanceAnalytics userPerformance={analytics.userPerformance} />
+                  </div>
+                )}
+                {analytics && (
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-800 mb-4">Product Type Analytics</h3>
+                    <ProductTypeAnalytics analytics={analytics} />
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Monthly Trends */}
+            <div>
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">Monthly Trend Analysis</h3>
+              <MonthlyTrendChart monthlyData={monthly} />
+            </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
       )}
     </div>
   );

@@ -68,8 +68,7 @@ export class AuthController {
         const LOCKOUT_MINUTES = 15;
         
         const updateData: any = {
-          failedLoginAttempts: failedAttempts,
-          lastFailedLogin: new Date()
+          failedLoginAttempts: failedAttempts
         };
 
         if (failedAttempts >= MAX_ATTEMPTS) {

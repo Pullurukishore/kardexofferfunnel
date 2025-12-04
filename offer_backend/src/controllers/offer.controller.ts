@@ -14,10 +14,11 @@ export class OfferController {
         return res.status(400).json({ error: 'Zone ID and product type are required' });
       }
 
-      // Zone users and zone managers can only request next reference for their own zone
-      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user.zoneId) {
-        if (parseInt(zoneId as string) !== parseInt(req.user.zoneId)) {
-          return res.status(403).json({ error: 'Access denied: zone mismatch' });
+      // Zone users and zone managers can only request next reference for their own zones
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER')) {
+        const userZoneIds = req.user.zoneIds || (req.user.zoneId ? [req.user.zoneId] : []);
+        if (!userZoneIds.includes(zoneId as string)) {
+          return res.status(403).json({ error: 'Access denied: zone not in your authorized zones' });
         }
       }
 
@@ -165,9 +166,12 @@ export class OfferController {
 
       const where: any = {};
 
-      // Zone users and zone managers can only see offers in their zone
-      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user.zoneId) {
-        where.zoneId = parseInt(req.user.zoneId);
+      // Zone users and zone managers can only see offers in their zones
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER')) {
+        const userZoneIds = req.user.zoneIds || (req.user.zoneId ? [req.user.zoneId] : []);
+        if (userZoneIds.length > 0) {
+          where.zoneId = { in: userZoneIds.map(id => parseInt(id)) };
+        }
       }
 
       // Filter by current user's offers only
@@ -347,10 +351,11 @@ export class OfferController {
         return res.status(404).json({ error: 'Offer not found' });
       }
 
-      // Zone users and zone managers can only access offers in their zone
-      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER') && req.user.zoneId) {
-        if (offer.zoneId !== parseInt(req.user.zoneId)) {
-          return res.status(403).json({ error: 'Access denied' });
+      // Zone users and zone managers can only access offers in their zones
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER')) {
+        const userZoneIds = req.user.zoneIds || (req.user.zoneId ? [req.user.zoneId] : []);
+        if (!userZoneIds.includes(offer.zoneId.toString())) {
+          return res.status(403).json({ error: 'Access denied: offer not in your authorized zones' });
         }
       }
 
@@ -538,7 +543,6 @@ export class OfferController {
 
       // TODO: Create offer-asset relationships after schema migration
       // For now, we'll store asset info in the machineSerialNumber field
-      console.log('Asset IDs received:', assetIds);
 
       // Log offer creation to audit trail
       await ActivityController.logOfferCreate({
@@ -833,6 +837,200 @@ export class OfferController {
     } catch (error) {
       logger.error('Add note error:', error);
       res.status(500).json({ error: 'Failed to add note' });
+      return;
+    }
+  }
+
+  // Get offer for quote generation (Zone Manager/User)
+  static async getOfferForQuote(req: AuthRequest, res: Response) {
+    try {
+      const { id } = req.params;
+
+      const offer = await prisma.offer.findUnique({
+        where: { id: parseInt(id) },
+        include: {
+          customer: {
+            include: {
+              contacts: {
+                where: {
+                  role: 'ACCOUNT_OWNER',
+                  isActive: true,
+                },
+              },
+            },
+          },
+          contact: true,
+          zone: true,
+          assignedTo: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          createdBy: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          updatedBy: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          offerSpareParts: {
+            include: {
+              sparePart: true,
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
+          offerAssets: {
+            include: {
+              asset: {
+                include: {
+                  customer: {
+                    select: {
+                      companyName: true,
+                    },
+                  },
+                },
+              },
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
+          stageRemarks: {
+            include: {
+              createdBy: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+            },
+            orderBy: {
+              createdAt: 'desc',
+            },
+          },
+        },
+      });
+
+      if (!offer) {
+        return res.status(404).json({ error: 'Offer not found' });
+      }
+
+      // Zone users and zone managers can only access offers in their zones
+      if ((req.user?.role === 'ZONE_USER' || req.user?.role === 'ZONE_MANAGER')) {
+        const userZoneIds = req.user.zoneIds || (req.user.zoneId ? [req.user.zoneId] : []);
+        if (!userZoneIds.includes(offer.zoneId.toString())) {
+          return res.status(403).json({ error: 'Access denied: offer not in your authorized zones' });
+        }
+      }
+
+      res.json({ offer });
+      return;
+    } catch (error) {
+      logger.error('Get offer for quote error:', error);
+      res.status(500).json({ error: 'Failed to fetch offer' });
+      return;
+    }
+  }
+
+  // Get offer for quote generation (Admin only)
+  static async getOfferForQuoteAdmin(req: AuthRequest, res: Response) {
+    try {
+      const { id } = req.params;
+
+      const offer = await prisma.offer.findUnique({
+        where: { id: parseInt(id) },
+        include: {
+          customer: {
+            include: {
+              contacts: {
+                where: {
+                  role: 'ACCOUNT_OWNER',
+                  isActive: true,
+                },
+              },
+            },
+          },
+          contact: true,
+          zone: true,
+          assignedTo: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          createdBy: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          updatedBy: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          offerSpareParts: {
+            include: {
+              sparePart: true,
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
+          offerAssets: {
+            include: {
+              asset: {
+                include: {
+                  customer: {
+                    select: {
+                      companyName: true,
+                    },
+                  },
+                },
+              },
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
+          stageRemarks: {
+            include: {
+              createdBy: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+            },
+            orderBy: {
+              createdAt: 'desc',
+            },
+          },
+        },
+      });
+
+      if (!offer) {
+        return res.status(404).json({ error: 'Offer not found' });
+      }
+
+      res.json({ offer });
+      return;
+    } catch (error) {
+      logger.error('Get offer for quote admin error:', error);
+      res.status(500).json({ error: 'Failed to fetch offer' });
       return;
     }
   }

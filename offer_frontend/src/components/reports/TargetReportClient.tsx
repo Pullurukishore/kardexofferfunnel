@@ -403,6 +403,7 @@ const TargetReportClient: React.FC<TargetReportClientProps> = ({
                     <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Target</th>
                     <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Actual</th>
                     <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Achievement</th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Expected Ach %</th>
                     <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Variance</th>
                     <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Action</th>
                   </tr>
@@ -422,6 +423,11 @@ const TargetReportClient: React.FC<TargetReportClientProps> = ({
                       <td className="px-4 py-3 text-right">
                         <Badge className={`${getAchievementColor(target.achievement)} text-xs font-bold`}>
                           {target.achievement.toFixed(1)}%
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Badge className={`${getAchievementColor(target.expectedAchievement)} text-xs font-bold`}>
+                          {target.expectedAchievement?.toFixed(1) || 0}%
                         </Badge>
                       </td>
                       <td className={`px-4 py-3 text-right text-sm font-semibold flex items-center justify-end gap-1 ${
@@ -473,6 +479,7 @@ const TargetReportClient: React.FC<TargetReportClientProps> = ({
                     <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Target</th>
                     <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Actual</th>
                     <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Achievement</th>
+                    <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Expected Ach %</th>
                     <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Variance</th>
                     <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Action</th>
                   </tr>
@@ -501,6 +508,11 @@ const TargetReportClient: React.FC<TargetReportClientProps> = ({
                       <td className="px-4 py-3 text-right">
                         <Badge className={`${getAchievementColor(target.achievement)} text-xs font-bold`}>
                           {target.achievement.toFixed(1)}%
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Badge className={`${getAchievementColor(target.expectedAchievement)} text-xs font-bold`}>
+                          {target.expectedAchievement?.toFixed(1) || 0}%
                         </Badge>
                       </td>
                       <td className={`px-4 py-3 text-right text-sm font-semibold flex items-center justify-end gap-1 ${

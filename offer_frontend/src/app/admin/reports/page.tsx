@@ -1,15 +1,11 @@
-import { Suspense } from 'react';
 import ReportsClient from '@/components/reports/ReportsClient';
 import type { ReportFilters } from '@/types/reports';
 import { subDays } from 'date-fns';
-import { getZones, getCustomers } from '@/lib/server/reports';
 
-export default async function ReportsPage() {
-  const [zones, customers] = await Promise.all([
-    getZones(),
-    getCustomers(),
-  ]);
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
+export default function ReportsPage() {
   const initialFilters: ReportFilters = {
     dateRange: {
       from: subDays(new Date(), 90),
@@ -20,15 +16,13 @@ export default async function ReportsPage() {
 
   return (
     <div className="container mx-auto py-6 px-4">
-      <Suspense fallback={<div>Loading reports...</div>}>
-        <ReportsClient
-          initialFilters={initialFilters}
-          initialReportData={null}
-          zones={zones}
-          customers={customers}
-          isZoneUser={false}
-        />
-      </Suspense>
+      <ReportsClient
+        initialFilters={initialFilters}
+        initialReportData={null}
+        zones={[]}
+        customers={[]}
+        isZoneUser={false}
+      />
     </div>
   );
 }

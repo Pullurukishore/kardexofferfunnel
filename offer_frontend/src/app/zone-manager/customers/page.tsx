@@ -1,6 +1,9 @@
 import CustomerClient from '@/components/customer/CustomerClient';
 import { cookies } from 'next/headers';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 async function getCustomers(searchParams: any) {
   try {
     const cookieStore = cookies();
@@ -49,13 +52,12 @@ async function getCustomers(searchParams: any) {
 export default async function ZoneManagerCustomersPage({
   searchParams,
 }: {
-  searchParams: { search?: string; status?: string; page?: string }
+  searchParams: { search?: string; status?: string }
 }) {
   const search = searchParams.search || '';
   const status = searchParams.status || 'all';
-  const page = searchParams.page || '1';
 
-  const { customers, stats } = await getCustomers({ search, status, page });
+  const { customers, stats } = await getCustomers({ search, status });
 
   return (
     <div className="space-y-6">
@@ -82,7 +84,7 @@ export default async function ZoneManagerCustomersPage({
       <CustomerClient 
         initialCustomers={customers}
         initialStats={stats}
-        searchParams={{ search, status, page }}
+        searchParams={{ search, status }}
         readOnly
         viewBasePath="/zone-manager/customers"
       />

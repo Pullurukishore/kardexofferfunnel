@@ -125,7 +125,6 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   if (res.headersSent) {
     return next(err);
   }
-  console.error(err.stack);
   res.status(500).json({ 
     error: 'Internal server error',
     ...(process.env.NODE_ENV === 'development' && { details: err.message })

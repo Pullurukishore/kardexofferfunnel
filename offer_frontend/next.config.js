@@ -8,6 +8,11 @@ const nextConfig = {
   poweredByHeader: false,
   generateEtags: true,
   
+  // Force dynamic rendering for pages that use cookies
+  experimental: {
+    serverComponentsExternalPackages: ['cookies-next'],
+  },
+  
   // Webpack configuration for performance
   webpack: (config, { isServer, dev }) => {
     // Skip complex optimizations in development
@@ -34,7 +39,7 @@ const nextConfig = {
         chunks: 'all',
         cacheGroups: {
           vendor: {
-            test: /[\\/]node_modules[\\/]/,
+            test: /[\/]node_modules[\/]/,
             name: 'vendors',
             priority: 20,
             chunks: 'all',
@@ -45,6 +50,12 @@ const nextConfig = {
             priority: 10,
             chunks: 'all',
             reuseExistingChunk: true,
+          },
+          ui: {
+            test: /[\/]components[\/]ui[\/]/,
+            name: 'ui',
+            priority: 15,
+            chunks: 'all',
           },
         },
       };

@@ -1,0 +1,63 @@
+{
+  "totalOffers": 495,
+  "zoneStats": {
+    "WEST": {
+      "count": 193,
+      "totalValue": 7398511
+    },
+    "SOUTH": {
+      "count": 196,
+      "totalValue": 6983289
+    },
+    "NORTH": {
+      "count": 94,
+      "totalValue": 4199439
+    },
+    "EAST": {
+      "count": 12,
+      "totalValue": 548243
+    }
+  },
+  "userStats": {
+    "Yogesh": {
+      "count": 46,
+      "totalValue": 1871419
+    },
+    "Ashraf": {
+      "count": 48,
+      "totalValue": 2145347
+    },
+    "Rahul": {
+      "count": 47,
+      "totalValue": 1461887
+    },
+    "Minesh": {
+      "count": 52,
+      "totalValue": 1919858
+    },
+    "Gajendra": {
+      "count": 65,
+      "totalValue": 1004418
+    },
+    "Pradeep": {
+      "count": 79,
+      "totalValue": 3606208
+    },
+    "Sasi": {
+      "count": 52,
+      "totalValue": 2372663
+    },
+    "Vinay": {
+      "count": 21,
+      "totalValue": 959550
+    },
+    "Nitin": {
+      "count": 73,
+      "totalValue": 3239889
+    },
+    "Pankaj": {
+      "count": 12,
+      "totalValue": 548243
+    }
+  }
+}

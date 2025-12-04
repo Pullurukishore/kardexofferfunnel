@@ -37,7 +37,6 @@ interface CustomerClientProps {
   searchParams: {
     search?: string;
     status?: string;
-    page?: string;
   };
   readOnly?: boolean;
   viewBasePath?: string;
@@ -63,15 +62,18 @@ const CustomerClient = memo(function CustomerClient({
       setError(null);
       
       const params: any = {
-        page: searchParams.page || 1,
-        limit: 100,
+        limit: 10000, // Show all customers
       };
 
       if (searchParams.search) params.search = searchParams.search;
       if (searchParams.status && searchParams.status !== 'all') params.status = searchParams.status;
 
+      console.log('CustomerClient - Fetching customers with params:', params);
       const response = await apiService.getCustomers(params);
-      const customerData = response.customers || [];
+      console.log('CustomerClient - API response:', response);
+      
+      const customerData = response.customers || response.data || [];
+      console.log('CustomerClient - Customer data:', customerData);
       
       setCustomers(customerData);
       
@@ -100,16 +102,19 @@ const CustomerClient = memo(function CustomerClient({
   useEffect(() => {
     const currentSearchParams = JSON.stringify(searchParams);
     
-    if (initialLoadComplete.current && currentSearchParams !== lastSearchParams.current) {
+    // Always fetch data on mount if no initial data provided
+    if (!initialLoadComplete.current) {
+      console.log('CustomerClient - Initial load, fetching data');
+      fetchCustomerData().then(() => {
+        initialLoadComplete.current = true;
+      });
+    } else if (currentSearchParams !== lastSearchParams.current) {
       console.log('CustomerClient - Search params changed, fetching new data');
       fetchCustomerData();
-    } else if (!initialLoadComplete.current) {
-      console.log('CustomerClient - Initial load complete, using server-side data');
-      initialLoadComplete.current = true;
     }
     
     lastSearchParams.current = currentSearchParams;
-  }, [searchParams.search, searchParams.status, searchParams.page, fetchCustomerData]);
+  }, [searchParams.search, searchParams.status, fetchCustomerData]);
 
   const handleRefresh = useCallback(async () => {
     await fetchCustomerData();
@@ -137,6 +142,40 @@ const CustomerClient = memo(function CustomerClient({
               <RefreshCw className="mr-2 h-4 w-4" />
               Try Again
             </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading state for initial load
+  if (isRefreshing && !initialLoadComplete.current) {
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <div className="h-8 bg-gray-200 rounded w-48 animate-pulse"></div>
+          <div className="h-10 bg-gray-200 rounded w-32 animate-pulse"></div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="bg-white p-6 rounded-lg shadow-sm border animate-pulse">
+              <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+              <div className="h-8 bg-gray-200 rounded w-1/2"></div>
+            </div>
+          ))}
+        </div>
+
+        <div className="bg-white rounded-lg shadow-sm border">
+          <div className="p-6 space-y-4">
+            {[...Array(10)].map((_, i) => (
+              <div key={i} className="flex items-center space-x-4">
+                <div className="h-4 bg-gray-200 rounded w-1/4"></div>
+                <div className="h-4 bg-gray-200 rounded w-1/6"></div>
+                <div className="h-4 bg-gray-200 rounded w-1/8"></div>
+                <div className="h-4 bg-gray-200 rounded w-1/12"></div>
+              </div>
+            ))}
           </div>
         </div>
       </div>

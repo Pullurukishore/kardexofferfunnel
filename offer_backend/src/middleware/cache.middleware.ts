@@ -38,7 +38,6 @@ export const cacheMiddleware = (options: CacheOptions = {}) => {
     // Check cache
     const cached = cache.get(key);
     if (cached && Date.now() - cached.timestamp < cached.ttl) {
-      console.log(`Cache HIT for ${key}`);
       return res.json(cached.data);
     }
 
@@ -47,7 +46,6 @@ export const cacheMiddleware = (options: CacheOptions = {}) => {
     res.json = function(data: any) {
       // Only cache successful responses
       if (res.statusCode >= 200 && res.statusCode < 300) {
-        console.log(`Cache SET for ${key}`);
         cache.set(key, { data, timestamp: Date.now(), ttl });
       }
       return originalJson.call(this, data);

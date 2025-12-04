@@ -144,7 +144,6 @@ export const listAssets = async (req: Request, res: Response): Promise<void> => 
       },
     });
   } catch (error) {
-    console.error('listAssets error', error);
     res.status(500).json({ message: 'Failed to fetch assets' });
   }
 };
@@ -182,7 +181,6 @@ export const getAsset = async (req: Request, res: Response): Promise<void> => {
     }
     res.json(mapReadAsset({ ...asset, _count: { offerAssets: offersCount } }));
   } catch (error) {
-    console.error('getAsset error', error);
     res.status(500).json({ message: 'Failed to fetch asset' });
   }
 };
@@ -211,7 +209,6 @@ export const createAsset = async (req: Request, res: Response): Promise<void> =>
 
     res.status(201).json(mapReadAsset(created));
   } catch (error) {
-    console.error('createAsset error', error);
     res.status(500).json({ message: 'Failed to create asset' });
   }
 };
@@ -243,7 +240,6 @@ export const updateAsset = async (req: Request, res: Response): Promise<void> =>
 
     res.json(mapReadAsset(updated));
   } catch (error) {
-    console.error('updateAsset error', error);
     res.status(500).json({ message: 'Failed to update asset' });
   }
 };
@@ -259,7 +255,6 @@ export const deleteAsset = async (req: Request, res: Response): Promise<void> =>
     await prisma.asset.delete({ where: { id } });
     res.json({ message: 'Asset deleted successfully' });
   } catch (error) {
-    console.error('deleteAsset error', error);
     res.status(500).json({ message: 'Failed to delete asset' });
   }
 };

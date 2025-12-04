@@ -10,6 +10,13 @@ router.use(authenticate);
 // Get next offer reference number (for preview)
 router.get('/next-reference', OfferController.getNextOfferReferenceNumber);
 
+// Quote generation endpoints (must come before /:id route)
+// Zone manager/user quote endpoint
+router.get('/quote/zone/:id', OfferController.getOfferForQuote);
+
+// Admin quote endpoint
+router.get('/quote/admin/:id', authorize('ADMIN'), OfferController.getOfferForQuoteAdmin);
+
 // Get all offers (both admin and zone users)
 router.get('/', OfferController.getOffers);
 

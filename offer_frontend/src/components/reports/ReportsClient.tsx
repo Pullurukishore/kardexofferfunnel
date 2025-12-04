@@ -102,10 +102,53 @@ interface ReportsClientProps {
 const ReportsClient: React.FC<ReportsClientProps> = ({
   initialFilters,
   initialReportData,
-  zones,
-  customers,
+  zones: initialZones,
+  customers: initialCustomers,
   isZoneUser,
 }) => {
+  // State for zones and customers (fetched client-side)
+  const [zones, setZones] = useState<Array<{ id: number; name: string }>>(initialZones || []);
+  const [customers, setCustomers] = useState<Array<{ id: number; companyName: string }>>(initialCustomers || []);
+  const [isLoadingZones, setIsLoadingZones] = useState(false);
+  const [isLoadingCustomers, setIsLoadingCustomers] = useState(false);
+
+  // Fetch zones and customers on mount
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      // Fetch zones
+      if (!zones || zones.length === 0) {
+        setIsLoadingZones(true);
+        try {
+          const response = await apiService.getZones();
+          const zonesData = Array.isArray(response) ? response : (response.data || []);
+          setZones(zonesData);
+        } catch (error) {
+          console.error('Error fetching zones:', error);
+          setZones([]);
+        } finally {
+          setIsLoadingZones(false);
+        }
+      }
+
+      // Fetch customers
+      if (!customers || customers.length === 0) {
+        setIsLoadingCustomers(true);
+        try {
+          const response = await apiService.getCustomers({ isActive: 'true', limit: 1000 });
+          const customersData = Array.isArray(response) ? response : (response.data || response.customers || []);
+          setCustomers(customersData);
+        } catch (error) {
+          console.error('Error fetching customers:', error);
+          setCustomers([]);
+        } finally {
+          setIsLoadingCustomers(false);
+        }
+      }
+    };
+
+    fetchInitialData();
+  }, []);
+
   // Initialize zone for zone managers - ensure it's set from either initialFilters or first zone
   const getInitialZoneId = () => {
     if (initialFilters.zoneId) return initialFilters.zoneId;
@@ -146,32 +189,35 @@ const ReportsClient: React.FC<ReportsClientProps> = ({
   const [productTypeAnalysisData, setProductTypeAnalysisData] = useState<any>(null);
   const [customerPerformanceData, setCustomerPerformanceData] = useState<any>(null);
   
-  // Dynamic customer filtering based on zone
-  const [dynamicCustomers, setDynamicCustomers] = useState<Array<{ id: number; companyName: string }>>(customers);
-  const [isLoadingCustomers, setIsLoadingCustomers] = useState(false);
-
   // Function to fetch customers for a specific zone
   const fetchCustomersForZone = useCallback(async (zoneId?: string) => {
     if (!zoneId) {
-      setDynamicCustomers(customers);
+      // Reset to all customers
+      try {
+        const response = await apiService.getCustomers({ isActive: 'true', limit: 1000 });
+        const customersData = Array.isArray(response) ? response : (response.data || response.customers || []);
+        setCustomers(customersData);
+      } catch (error) {
+        console.error('Error fetching all customers:', error);
+        setCustomers([]);
+      }
       return;
     }
     
     setIsLoadingCustomers(true);
     try {
-      const params = new URLSearchParams({ isActive: 'true', zoneId });
       const response = await apiService.getCustomers({ isActive: 'true', zoneId, limit: 1000 });
       const customersData = Array.isArray(response) ? response : (response.data || response.customers || []);
-      setDynamicCustomers(customersData);
+      setCustomers(customersData);
       // Clear customer filter when zone changes
       setFilters(prev => ({ ...prev, customerId: undefined }));
     } catch (error) {
       console.error('Error fetching customers for zone:', error);
-      setDynamicCustomers([]);
+      setCustomers([]);
     } finally {
       setIsLoadingCustomers(false);
     }
-  }, [customers]);
+  }, []);
 
   const fetchReport = useCallback(async () => {
     try {
@@ -606,7 +652,7 @@ const ReportsClient: React.FC<ReportsClientProps> = ({
             filters={filters}
             onFilterChange={handleFilterChange}
             zones={zones}
-            customers={dynamicCustomers}
+            customers={customers}
             isZoneUser={isZoneUser}
             isLoadingCustomers={isLoadingCustomers}
           />

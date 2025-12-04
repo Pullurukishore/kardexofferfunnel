@@ -1,331 +1,536 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter, useParams } from 'next/navigation'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { 
-  ArrowLeft, 
-  Edit, 
-  CheckCircle, 
-  Clock, 
-  FileText, 
-  DollarSign,
-  User,
-  Building2,
-  Phone,
-  Mail,
-  MapPin,
-  Calendar,
-  Package,
-  TrendingUp,
-  AlertCircle,
+  ArrowLeft,
+  Download,
+  Printer,
   Loader2,
-  Wrench,
-  IndianRupee,
-  ImageIcon
+  Edit,
+  Save,
+  Upload,
+  X
 } from 'lucide-react'
 import { apiService } from '@/services/api'
 import { toast } from 'sonner'
+import { format } from 'date-fns'
 
-// Main progression stages (excludes LOST as it's a separate outcome)
-const STAGES = [
-  { key: 'INITIAL', label: 'Initial', icon: FileText },
-  { key: 'PROPOSAL_SENT', label: 'Proposal Sent', icon: FileText },
-  { key: 'NEGOTIATION', label: 'Negotiation', icon: TrendingUp },
-  { key: 'FINAL_APPROVAL', label: 'Final Approval', icon: CheckCircle },
-  { key: 'PO_RECEIVED', label: 'PO Received', icon: Package },
-  { key: 'ORDER_BOOKED', label: 'Order Booked', icon: CheckCircle },
-  { key: 'WON', label: 'Won', icon: CheckCircle }
-]
+// ==================== Types ====================
+interface Customer {
+  companyName?: string
+  address?: string
+  city?: string
+  state?: string
+  pincode?: string
+  contacts?: Array<{
+    contactPersonName: string
+    role: string
+  }>
+}
 
-// LOST is a separate outcome, not part of linear progression
-const LOST_STAGE = { key: 'LOST', label: 'Lost', icon: AlertCircle }
+interface OfferItem {
+  id: number
+  partNo: string
+  description: string
+  hsnCode: string
+  unitPrice: string
+  quantity: number
+  total?: string
+}
 
-// All stages for selection dropdown
-const ALL_STAGES = [...STAGES, LOST_STAGE]
-
-// Stage-specific context and requirements
-const STAGE_INFO: Record<string, { description: string; color: string; icon: string; requiresAllFields: boolean }> = {
-  'INITIAL': {
-    description: 'Initial stage - Basic offer information setup',
-    color: 'blue',
-    icon: '📝',
-    requiresAllFields: false
-  },
-  'PROPOSAL_SENT': {
-    description: 'Proposal has been sent to customer - Ensure all offer details are finalized before sending',
-    color: 'indigo',
-    icon: '📨',
-    requiresAllFields: true
-  },
-  'NEGOTIATION': {
-    description: 'In active negotiations - Document key discussion points, pricing changes, objections, and customer concerns',
-    color: 'amber',
-    icon: '💬',
-    requiresAllFields: true
-  },
-  'FINAL_APPROVAL': {
-    description: 'Awaiting final sign-off - Document decision makers, approval timeline, and any final conditions or commitments',
-    color: 'purple',
-    icon: '✅',
-    requiresAllFields: true
-  },
-  'PO_RECEIVED': {
-    description: 'Purchase Order received - Capture PO details including PO number, date, and value for order processing',
-    color: 'green',
-    icon: '📄',
-    requiresAllFields: true
-  },
-  'ORDER_BOOKED': {
-    description: 'Order booked in SAP system - Capture booking date and finalize order processing',
-    color: 'teal',
-    icon: '📦',
-    requiresAllFields: true
-  },
-  'WON': {
-    description: 'Deal successfully closed! Ensure all PO and order details are complete',
-    color: 'green',
-    icon: '🎉',
-    requiresAllFields: true
-  },
-  'LOST': {
-    description: 'Deal lost - Document the reason for loss to improve future proposals',
-    color: 'red',
-    icon: '❌',
-    requiresAllFields: false
+interface OfferSparePart {
+  id: number
+  quantity: number
+  unitPrice: string
+  totalPrice: string
+  notes?: string
+  sparePart: {
+    id: number
+    name: string
+    partNumber: string
+    description?: string
+    category?: string
   }
 }
 
-export default function OfferDetailPage() {
-  const router = useRouter()
+interface OfferAsset {
+  id: number
+  asset: {
+    id: number
+    assetName: string
+    machineSerialNumber?: string
+    model?: string
+    manufacturer?: string
+    location?: string
+    customer?: {
+      companyName: string
+    }
+  }
+}
+
+interface MachineDetails {
+  model: string
+  serialNumber: string
+  owner: string
+  department: string
+}
+
+interface Offer {
+  offerReferenceNumber: string
+  title?: string
+  description?: string
+  subject?: string
+  introduction?: string
+  offerValue?: string
+  remarks?: string
+  contactPersonName?: string
+  contactPersonPhone?: string
+  contactPersonEmail?: string
+  contactNumber?: string
+  email?: string
+  company?: string
+  productType?: string
+  machineSerialNumber?: string
+  location?: string
+  department?: string
+  customer?: Customer
+  contact?: {
+    contactPersonName: string
+    contactNumber?: string
+    email?: string
+  }
+  items?: OfferItem[]
+  machineDetails?: MachineDetails
+  offerSpareParts?: OfferSparePart[]
+  offerAssets?: OfferAsset[]
+}
+
+interface EditableData {
+  companyName: string
+  companyAddress: string
+  companyCity: string
+  companyPhone: string
+  companyFax: string
+  companyEmail: string
+  companyWebsite: string
+  gstNumber: string
+  arnNumber: string
+  title: string
+  description: string
+  subject: string
+  introduction: string
+  offerValue: string
+  gstRate: number
+  remarks: string
+  contactPersonName: string
+  contactPersonPhone: string
+  contactPersonEmail: string
+  signatureImage: string | null
+  items: OfferItem[]
+  machineDetails: MachineDetails
+}
+
+// ==================== Constants ====================
+const DEFAULT_COMPANY_INFO = {
+  companyName: 'Kardex India Pvt Ltd',
+  companyAddress: 'Brigade Rubix, 602, 6th Floor, HMT Watch Factory Road',
+  companyCity: 'Bengaluru, Karnataka – 560 022 (INDIA)',
+  companyPhone: '+91 80 29724450',
+  companyFax: '+91 80 29724460',
+  companyEmail: 'info@kardex.com',
+  companyWebsite: 'www.kardex.com',
+  gstNumber: '29AADCK5377L1ZW',
+  arnNumber: 'AA2903170325554',
+} as const
+
+const QUOTE_VALIDITY_DAYS = 30
+const DEFAULT_GST_RATE = 18
+const DEFAULT_ITEM: OfferItem = {
+  id: 1,
+  partNo: '',
+  description: '',
+  hsnCode: '',
+  unitPrice: '',
+  quantity: 1,
+  total: ''
+}
+
+const DEFAULT_MACHINE_DETAILS: MachineDetails = {
+  model: '',
+  serialNumber: '',
+  owner: '',
+  department: ''
+}
+
+// ==================== Helper Functions ====================
+const calculateItemTotal = (unitPrice: string, quantity: number): number => {
+  const price = parseFloat(unitPrice) || 0
+  return price * quantity
+}
+
+const formatCurrency = (value: number): string => {
+  return value.toLocaleString('en-IN', { minimumFractionDigits: 2 })
+}
+
+const getValidUntilDate = (): Date => {
+  const date = new Date()
+  date.setDate(date.getDate() + QUOTE_VALIDITY_DAYS)
+  return date
+}
+
+// ==================== Sub-Components ====================
+interface LogoProps {
+  className?: string
+}
+
+const KardexLogo = ({ className = 'h-6' }: LogoProps) => (
+  <div className="mb-4">
+    <img 
+      src="/kardex.png" 
+      alt="Kardex Remstar" 
+      className={className}
+      onError={(e) => { 
+        e.currentTarget.style.display = 'none'
+        console.error('Logo not found')
+      }}
+    />
+  </div>
+)
+
+interface PageFooterProps {
+  pageNumber: number
+  totalPages?: number
+}
+
+const PageFooter = ({ pageNumber, totalPages = 11 }: PageFooterProps) => (
+  <div className="page-footer">
+    <div className="footer-content">
+      <span>{pageNumber} / {totalPages}</span>
+      <span>Service Care Vertrag</span>
+      <span>{format(new Date(), 'yyyy/MM/dd')}</span>
+    </div>
+  </div>
+)
+
+interface ItemRowProps {
+  item: OfferItem
+  index: number
+  isEditMode: boolean
+  onUpdate: (id: number, field: keyof OfferItem, value: string | number) => void
+  onRemove: (id: number) => void
+  canRemove: boolean
+}
+
+const ItemRow = ({ item, index, isEditMode, onUpdate, onRemove, canRemove }: ItemRowProps) => (
+  <tr>
+    <td className="text-center">{index + 1}</td>
+    <td>
+      {isEditMode ? (
+        <Input
+          value={item.partNo}
+          onChange={(e) => onUpdate(item.id, 'partNo', e.target.value)}
+          placeholder="Part No"
+          className="h-7 text-xs w-full"
+          aria-label={`Part number for item ${index + 1}`}
+        />
+      ) : (
+        item.partNo || '-'
+      )}
+    </td>
+    <td>
+      {isEditMode ? (
+        <Input
+          value={item.description}
+          onChange={(e) => onUpdate(item.id, 'description', e.target.value)}
+          placeholder="Description"
+          className="h-7 text-xs w-full"
+          aria-label={`Description for item ${index + 1}`}
+        />
+      ) : (
+        item.description || '-'
+      )}
+    </td>
+    <td>
+      {isEditMode ? (
+        <Input
+          value={item.hsnCode}
+          onChange={(e) => onUpdate(item.id, 'hsnCode', e.target.value)}
+          placeholder="HSN"
+          className="h-7 text-xs w-full"
+          aria-label={`HSN code for item ${index + 1}`}
+        />
+      ) : (
+        item.hsnCode || '-'
+      )}
+    </td>
+    <td className="text-right">
+      {isEditMode ? (
+        <Input
+          type="number"
+          value={item.unitPrice}
+          onChange={(e) => onUpdate(item.id, 'unitPrice', e.target.value)}
+          placeholder="0"
+          className="h-7 text-xs w-full text-right"
+          aria-label={`Unit price for item ${index + 1}`}
+        />
+      ) : (
+        item.unitPrice ? parseFloat(item.unitPrice).toLocaleString('en-IN') : '-'
+      )}
+    </td>
+    <td className="text-right">
+      {isEditMode ? (
+        <Input
+          type="number"
+          value={item.quantity}
+          onChange={(e) => onUpdate(item.id, 'quantity', parseInt(e.target.value) || 1)}
+          placeholder="1"
+          min="1"
+          className="h-7 text-xs w-full text-right"
+          aria-label={`Quantity for item ${index + 1}`}
+        />
+      ) : (
+        (item.partNo || item.description) ? item.quantity : '-'
+      )}
+    </td>
+    <td className="text-right font-medium">
+      {formatCurrency(calculateItemTotal(item.unitPrice, item.quantity))}
+    </td>
+    {isEditMode && (
+      <td className="text-center print:hidden">
+        <Button
+          onClick={() => onRemove(item.id)}
+          size="sm"
+          variant="ghost"
+          className="h-6 w-6 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+          disabled={!canRemove}
+          aria-label={`Remove item ${index + 1}`}
+          title={canRemove ? 'Remove item' : 'Cannot remove last item'}
+        >
+          ×
+        </Button>
+      </td>
+    )}
+  </tr>
+)
+
+// ==================== Main Component ====================
+export default function QuoteGenerationPage() {
   const params = useParams()
-  const [offer, setOffer] = useState<any>(null)
+  const router = useRouter()
+  const offerId = params.id as string
+  const printRef = useRef<HTMLDivElement>(null)
+
+  // ==================== State Management ====================
+  const [offer, setOffer] = useState<Offer | null>(null)
   const [loading, setLoading] = useState(true)
-  const [showUpdateDialog, setShowUpdateDialog] = useState(false)
-  const [updating, setUpdating] = useState(false)
-  const [updateData, setUpdateData] = useState({
-    offerReferenceDate: '',
+  const [isEditMode, setIsEditMode] = useState(false)
+  const [editableData, setEditableData] = useState<EditableData>({
+    ...DEFAULT_COMPANY_INFO,
     title: '',
+    description: '',
+    subject: '',
+    introduction: '',
     offerValue: '',
-    offerMonth: '',
-    probabilityPercentage: '',
-    poExpectedMonth: '',
-    stage: '',
+    gstRate: DEFAULT_GST_RATE,
     remarks: '',
-    poNumber: '',
-    poDate: '',
-    poValue: '',
-    bookingDateInSap: ''
+    contactPersonName: '',
+    contactPersonPhone: '',
+    contactPersonEmail: '',
+    signatureImage: null,
+    items: [DEFAULT_ITEM],
+    machineDetails: DEFAULT_MACHINE_DETAILS
   })
 
-  useEffect(() => {
-    if (params.id) {
-      fetchOffer()
-    }
-  }, [params.id])
-
-  const fetchOffer = async () => {
+  // ==================== Data Fetching ====================
+  const fetchOffer = useCallback(async () => {
     try {
       setLoading(true)
-      const response = await apiService.getOffer(parseInt(params.id as string))
-      console.log('📊 Offer Response:', response)
-      console.log('🔍 Offer Data:', response.offer)
-      console.log('🗺️ Zone Data from offer:', response.offer?.zone)
-      console.log('🗺️ Zone ID from offer:', response.offer?.zoneId)
-      console.log('🗺️ Customer Zone Data:', response.offer?.customer?.zone)
+      console.log('🔍 Fetching offer with ID:', offerId)
       
-      // If offer doesn't have zone but has customer with zone, use customer's zone
-      let offerData = response.offer
-      if (!offerData.zone && offerData.customer?.zone) {
-        offerData.zone = offerData.customer.zone
-        console.log('✅ Using zone from customer:', offerData.zone)
-      }
+      // Use zone endpoint for zone managers
+      const response = await apiService.getOfferForQuote(parseInt(offerId))
       
+      console.log('✅ Offer data received:', response)
+      const offerData: Offer = response.offer
       setOffer(offerData)
-      // Initialize update data
-      setUpdateData({
-        offerReferenceDate: response.offer.offerReferenceDate ? new Date(response.offer.offerReferenceDate).toISOString().split('T')[0] : '',
-        title: response.offer.title || '',
-        offerValue: response.offer.offerValue || '',
-        offerMonth: response.offer.offerMonth || '',
-        probabilityPercentage: response.offer.probabilityPercentage || '',
-        poExpectedMonth: response.offer.poExpectedMonth || '',
-        stage: response.offer.stage,
-        remarks: '', // Always start with empty remarks field - stage remarks are shown separately
-        poNumber: response.offer.poNumber || '',
-        poDate: response.offer.poDate ? new Date(response.offer.poDate).toISOString().split('T')[0] : '',
-        poValue: response.offer.poValue || '',
-        bookingDateInSap: response.offer.bookingDateInSap ? new Date(response.offer.bookingDateInSap).toISOString().split('T')[0] : ''
+      
+      // Map spare parts to items format
+      const mappedItems: OfferItem[] = offerData.offerSpareParts && offerData.offerSpareParts.length > 0
+        ? offerData.offerSpareParts.map((osp, index) => ({
+            id: index + 1,
+            partNo: osp.sparePart.partNumber,
+            description: osp.sparePart.description || osp.sparePart.name,
+            hsnCode: osp.sparePart.category || '',
+            unitPrice: osp.unitPrice.toString(),
+            quantity: osp.quantity,
+            total: osp.totalPrice.toString()
+          }))
+        : [DEFAULT_ITEM];
+
+      // Get machine details from assets
+      const firstAsset = offerData.offerAssets && offerData.offerAssets.length > 0 
+        ? offerData.offerAssets[0].asset 
+        : null;
+
+      // Determine machine owner (ACCOUNT_OWNER contact name)
+      const accountOwner = offerData.customer?.contacts?.find(c => c.role === 'ACCOUNT_OWNER');
+      const machineOwner = accountOwner?.contactPersonName || '';
+
+      // Initialize editable data
+      setEditableData({
+        ...DEFAULT_COMPANY_INFO,
+        title: offerData.title || '',
+        description: offerData.description || '',
+        subject: offerData.subject || '',
+        introduction: offerData.introduction || '',
+        offerValue: offerData.offerValue?.toString() || '',
+        gstRate: DEFAULT_GST_RATE,
+        remarks: offerData.remarks || '',
+        contactPersonName: offerData.contact?.contactPersonName || offerData.contactPersonName || '',
+        contactPersonPhone: offerData.contact?.contactNumber || offerData.contactNumber || '',
+        contactPersonEmail: offerData.contact?.email || offerData.email || '',
+        signatureImage: null, // Will be loaded separately if exists
+        items: mappedItems,
+        machineDetails: {
+          model: firstAsset?.model || '',
+          serialNumber: firstAsset?.machineSerialNumber || offerData.machineSerialNumber || '',
+          owner: machineOwner,
+          department: offerData.department || offerData.location || ''
+        }
       })
     } catch (error: any) {
-      console.error('Failed to fetch offer:', error)
-      console.error('❌ Error Response:', error.response?.data)
-      toast.error('Failed to load offer details')
+      console.error('❌ Failed to fetch offer:', error)
+      console.error('❌ Error response:', error.response?.data)
+      console.error('❌ Error status:', error.response?.status)
+      
+      if (error.response?.status === 403) {
+        toast.error('Access denied: You do not have permission to view this offer')
+      } else if (error.response?.status === 404) {
+        toast.error('Offer not found')
+      } else {
+        toast.error('Failed to load offer details')
+      }
     } finally {
       setLoading(false)
     }
-  }
+  }, [offerId])
 
-  const handleUpdateOffer = async () => {
-    try {
-      // Validation
-      if (!updateData.stage) {
-        toast.error('Stage is required')
-        return
-      }
+  // ==================== Effects ====================
+  useEffect(() => {
+    fetchOffer()
+  }, [fetchOffer])
 
-      if (!updateData.title || !updateData.title.trim()) {
-        toast.error('Offer title is required')
-        return
-      }
+  // ==================== Event Handlers ====================
+  const handlePrint = useCallback(() => {
+    window.print()
+  }, [])
 
-      if (updateData.probabilityPercentage) {
-        const prob = parseInt(updateData.probabilityPercentage)
-        if (prob < 1 || prob > 100) {
-          toast.error('Win probability must be between 1 and 100')
-          return
-        }
-      }
+  const handleDownloadPDF = useCallback(() => {
+    window.print()
+    toast.success('Use your browser\'s print dialog to save as PDF')
+  }, [])
 
-      if (updateData.offerValue && parseFloat(updateData.offerValue) < 0) {
-        toast.error('Offer value cannot be negative')
-        return
-      }
-
-      // Check if stage requires all fields
-      const stageInfo = STAGE_INFO[updateData.stage]
-      if (stageInfo && stageInfo.requiresAllFields) {
-        const fieldLabels: Record<string, string> = {
-          offerReferenceDate: 'Offer Reference Date',
-          offerValue: 'Offer Value',
-          offerMonth: 'Offer Month',
-          probabilityPercentage: 'Win Probability',
-          poExpectedMonth: 'PO Expected Month'
-        }
-        
-        const requiredFields = ['offerReferenceDate', 'offerValue', 'offerMonth', 'probabilityPercentage', 'poExpectedMonth']
-        
-        for (const field of requiredFields) {
-          const value = updateData[field as keyof typeof updateData]
-          if (!value || (typeof value === 'string' && !value.trim())) {
-            toast.error(`${fieldLabels[field]} is required for ${ALL_STAGES.find(s => s.key === updateData.stage)?.label} stage`)
-            return
-          }
-        }
-      }
-
-      // PO_RECEIVED stage specific validations (skip for LOST)
-      if ((updateData.stage === 'PO_RECEIVED' || updateData.stage === 'ORDER_BOOKED' || updateData.stage === 'WON')) {
-        if (!updateData.poNumber || !updateData.poNumber.trim()) {
-          toast.error('PO Number is required for this stage')
-          return
-        }
-        if (!updateData.poDate) {
-          toast.error('PO Date is required for this stage')
-          return
-        }
-        if (!updateData.poValue) {
-          toast.error('PO Value is required for this stage')
-          return
-        }
-        if (parseFloat(updateData.poValue) <= 0) {
-          toast.error('PO Value must be greater than zero')
-          return
-        }
-      }
-
-      // ORDER_BOOKED stage specific validations (skip for LOST)
-      if ((updateData.stage === 'ORDER_BOOKED' || updateData.stage === 'WON')) {
-        if (!updateData.bookingDateInSap) {
-          toast.error('Booking Date in SAP is required for this stage')
-          return
-        }
-      }
-
-      // LOST stage specific validation - require reason for loss
-      if (updateData.stage === 'LOST') {
-        if (!updateData.remarks || !updateData.remarks.trim()) {
-          toast.error('Please provide a reason for losing this deal')
-          return
-        }
-      }
-
-      setUpdating(true)
-      const payload: any = {
-        offerReferenceDate: updateData.offerReferenceDate ? new Date(updateData.offerReferenceDate).toISOString() : null,
-        title: updateData.title.trim(),
-        offerValue: updateData.offerValue ? parseFloat(updateData.offerValue) : null,
-        offerMonth: updateData.offerMonth || null,
-        probabilityPercentage: updateData.probabilityPercentage ? parseInt(updateData.probabilityPercentage) : null,
-        poExpectedMonth: updateData.poExpectedMonth || null,
-        stage: updateData.stage,
-        remarks: updateData.remarks?.trim() || null,
-        poNumber: updateData.poNumber?.trim() || null,
-        poDate: updateData.poDate ? new Date(updateData.poDate).toISOString() : null,
-        poValue: updateData.poValue ? parseFloat(updateData.poValue) : null,
-        bookingDateInSap: updateData.bookingDateInSap ? new Date(updateData.bookingDateInSap).toISOString() : null
-      }
-
-      await apiService.updateOffer(offer.id, payload)
-      toast.success('Offer updated successfully')
-      setShowUpdateDialog(false)
-      
-      // Clear remarks field after successful update since it's now saved in StageRemark
-      setUpdateData(prev => ({ ...prev, remarks: '' }))
-      
-      fetchOffer()
-    } catch (error: any) {
-      console.error('Failed to update offer:', error)
-      toast.error(error.response?.data?.message || 'Failed to update offer')
-    } finally {
-      setUpdating(false)
+  const handleToggleEditMode = useCallback(() => {
+    if (isEditMode) {
+      toast.success('Changes saved!')
     }
-  }
+    setIsEditMode(prev => !prev)
+  }, [isEditMode])
 
-  const handleMoveToStage = (stage: string) => {
-    setUpdateData(prev => ({ ...prev, stage }))
-    setShowUpdateDialog(true)
-  }
+  // ==================== Computed Values ====================
+  const quoteDate = useMemo(() => new Date(), [])
+  const validUntil = useMemo(() => getValidUntilDate(), [])
 
-  const getCurrentStageIndex = () => {
-    return STAGES.findIndex(s => s.key === offer?.stage)
-  }
+  // ==================== Calculations ====================
+  const subtotal = useMemo(() => {
+    return editableData.items.reduce((sum, item) => {
+      return sum + calculateItemTotal(item.unitPrice, item.quantity)
+    }, 0)
+  }, [editableData.items])
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(value)
-  }
+  // ==================== Signature Upload ====================
+  const handleSignatureUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      // Validate file type
+      const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif']
+      if (!validTypes.includes(file.type)) {
+        toast.error('Please upload a valid image file (JPG, PNG, GIF)')
+        return
+      }
+      
+      // Validate file size (max 2MB)
+      if (file.size > 2 * 1024 * 1024) {
+        toast.error('File size should be less than 2MB')
+        return
+      }
+      
+      // Convert to base64 for preview
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const base64String = e.target?.result as string
+        setEditableData(prev => ({
+          ...prev,
+          signatureImage: base64String
+        }))
+        toast.success('Signature uploaded successfully!')
+      }
+      reader.readAsDataURL(file)
+    }
+  }, [])
 
+  const removeSignature = useCallback(() => {
+    setEditableData(prev => ({
+      ...prev,
+      signatureImage: null
+    }))
+    toast.success('Signature removed')
+  }, [])
+
+  // ==================== Item Management ====================
+  const addNewItem = useCallback(() => {
+    setEditableData(prev => ({
+      ...prev,
+      items: [
+        ...prev.items,
+        {
+          ...DEFAULT_ITEM,
+          id: prev.items.length + 1
+        }
+      ]
+    }))
+  }, [])
+
+  const removeItem = useCallback((id: number) => {
+    setEditableData(prev => {
+      if (prev.items.length <= 1) return prev
+      return {
+        ...prev,
+        items: prev.items.filter(item => item.id !== id)
+      }
+    })
+  }, [])
+
+  const updateItem = useCallback((id: number, field: keyof OfferItem, value: string | number) => {
+    setEditableData(prev => ({
+      ...prev,
+      items: prev.items.map(item =>
+        item.id === id ? { ...item, [field]: value } : item
+      )
+    }))
+  }, [])
+
+  // ==================== Render Helpers ====================
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto" />
-          <p className="mt-4 text-gray-600">Loading offer details...</p>
+      <div className="container mx-auto py-8">
+        <div className="flex flex-col items-center justify-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
+          <p className="text-gray-600">Loading quotation...</p>
         </div>
       </div>
     )
@@ -333,12 +538,10 @@ export default function OfferDetailPage() {
 
   if (!offer) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="container mx-auto py-8">
         <div className="text-center">
-          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
           <p className="text-gray-600">Offer not found</p>
-          <Button onClick={() => router.push('/admin/offers')} className="mt-4">
-            <ArrowLeft className="h-4 w-4 mr-2" />
+          <Button onClick={() => router.back()} className="mt-4">
             Go Back
           </Button>
         </div>
@@ -346,1317 +549,1794 @@ export default function OfferDetailPage() {
     )
   }
 
-  const currentStageIndex = getCurrentStageIndex()
-
   return (
-    <div className="space-y-6 pb-8">
-      {/* Header */}
-      <div className="flex justify-between items-start">
-        <div className="flex items-center gap-4">
+    <div>
+      {/* Action Buttons - Hidden on print */}
+      <div className="container mx-auto py-4 print:hidden">
+        <div className="flex items-center justify-between mb-4">
           <Button
-            variant="outline"
-            size="icon"
-            onClick={() => router.push('/admin/offers')}
+            variant="ghost"
+            size="sm"
+            onClick={() => router.push(`/zone-manager/offers/${offerId}`)}
+            aria-label="Go back to offer details"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Offer
           </Button>
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">{offer.offerReferenceNumber}</h1>
-            <p className="text-gray-600 mt-1">{offer.title || offer.customer?.companyName}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <Button onClick={() => router.push(`/admin/offers/${offer.id}/edit`)}>
-            <Edit className="h-4 w-4 mr-2" />
-            Edit Offer
-          </Button>
-        </div>
-      </div>
 
-      {/* Stage Progress - Modern Design */}
-      <Card className="shadow-xl overflow-hidden border-0">
-        <CardHeader className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white border-b-0 pb-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-2xl font-bold text-white mb-2">Offer Progress Journey</CardTitle>
-              <CardDescription className="text-blue-100">
-                Track your offer through each milestone - WON or LOST outcomes after Final Approval
-              </CardDescription>
-            </div>
-            <div className="bg-white/20 backdrop-blur-sm px-4 py-2 rounded-full border border-white/30">
-              <p className="text-sm font-semibold text-white">
-                Stage {currentStageIndex + 1} of {STAGES.length}
-              </p>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-10 pb-10 bg-gradient-to-br from-gray-50 to-white">
-          {/* Check if current stage is LOST */}
-          {offer.stage === 'LOST' ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <div className="relative">
-                <div className="w-28 h-28 rounded-full bg-gradient-to-br from-red-100 to-red-200 border-4 border-red-500 flex items-center justify-center mb-6 shadow-2xl">
-                  <AlertCircle className="h-14 w-14 text-red-600" />
-                </div>
-                <div className="absolute -top-2 -right-2 w-12 h-12 bg-red-500 rounded-full flex items-center justify-center shadow-lg">
-                  <span className="text-2xl">❌</span>
-                </div>
-              </div>
-              <h3 className="text-3xl font-bold text-red-600 mb-3">Deal Lost</h3>
-              <p className="text-gray-600 text-center max-w-md mb-6 text-lg">
-                This offer did not convert into a sale
-              </p>
-              <Badge className="bg-gradient-to-r from-red-500 to-red-600 text-white border-0 text-base px-6 py-3 shadow-lg">
-                Status: Lost
-              </Badge>
-            </div>
-          ) : (
-            <div className="relative px-4">
-              {/* Progress Line Background */}
-              <div className="absolute top-8 left-0 right-0 h-2 bg-gradient-to-r from-gray-200 to-gray-300 rounded-full" style={{ zIndex: 0 }}></div>
-              
-              {/* Progress Line Active */}
-              <div 
-                className={`absolute top-8 left-0 h-2 transition-all duration-700 ease-out rounded-full ${
-                  offer.stage === 'WON' 
-                    ? 'bg-gradient-to-r from-green-400 via-green-500 to-green-600 shadow-lg shadow-green-500/50' 
-                    : 'bg-gradient-to-r from-blue-400 via-indigo-500 to-purple-600 shadow-lg shadow-blue-500/50'
-                }`}
-                style={{ 
-                  width: `${(currentStageIndex / (STAGES.length - 1)) * 100}%`,
-                  zIndex: 0 
-                }}
-              ></div>
-              
-              {/* Stage Steps */}
-              <div className="relative flex justify-between" style={{ zIndex: 1 }}>
-                {STAGES.map((stage, index) => {
-                  const isPast = index < currentStageIndex
-                  const isCurrent = index === currentStageIndex
-                  const isWon = stage.key === 'WON' && offer.stage === 'WON'
-                  const Icon = stage.icon
-                  const stageInfo = STAGE_INFO[stage.key] || {}
-                  
-                  // Color mapping for each stage
-                  const stageColors = {
-                    blue: { 
-                      bg: 'from-blue-500 to-blue-600', 
-                      border: 'border-blue-500', 
-                      ring: 'ring-blue-200', 
-                      shadow: 'shadow-blue-500/50',
-                      text: 'text-blue-700',
-                      badge: 'bg-blue-100 text-blue-700 border-blue-300'
-                    },
-                    indigo: { 
-                      bg: 'from-indigo-500 to-indigo-600', 
-                      border: 'border-indigo-500', 
-                      ring: 'ring-indigo-200', 
-                      shadow: 'shadow-indigo-500/50',
-                      text: 'text-indigo-700',
-                      badge: 'bg-indigo-100 text-indigo-700 border-indigo-300'
-                    },
-                    amber: { 
-                      bg: 'from-amber-500 to-amber-600', 
-                      border: 'border-amber-500', 
-                      ring: 'ring-amber-200', 
-                      shadow: 'shadow-amber-500/50',
-                      text: 'text-amber-700',
-                      badge: 'bg-amber-100 text-amber-700 border-amber-300'
-                    },
-                    purple: { 
-                      bg: 'from-purple-500 to-purple-600', 
-                      border: 'border-purple-500', 
-                      ring: 'ring-purple-200', 
-                      shadow: 'shadow-purple-500/50',
-                      text: 'text-purple-700',
-                      badge: 'bg-purple-100 text-purple-700 border-purple-300'
-                    },
-                    green: { 
-                      bg: 'from-green-500 to-green-600', 
-                      border: 'border-green-500', 
-                      ring: 'ring-green-200', 
-                      shadow: 'shadow-green-500/50',
-                      text: 'text-green-700',
-                      badge: 'bg-green-100 text-green-700 border-green-300'
-                    },
-                    teal: { 
-                      bg: 'from-teal-500 to-teal-600', 
-                      border: 'border-teal-500', 
-                      ring: 'ring-teal-200', 
-                      shadow: 'shadow-teal-500/50',
-                      text: 'text-teal-700',
-                      badge: 'bg-teal-100 text-teal-700 border-teal-300'
-                    },
-                    red: { 
-                      bg: 'from-red-500 to-red-600', 
-                      border: 'border-red-500', 
-                      ring: 'ring-red-200', 
-                      shadow: 'shadow-red-500/50',
-                      text: 'text-red-700',
-                      badge: 'bg-red-100 text-red-700 border-red-300'
-                    }
-                  }
-                  
-                  const color = stageColors[stageInfo.color as keyof typeof stageColors] || stageColors.blue
-                  
-                  return (
-                    <div key={stage.key} className="flex flex-col items-center group" style={{ flex: 1 }}>
-                      {/* Stage Circle */}
-                      <div className="relative">
-                        <div 
-                          className={`
-                            relative w-16 h-16 rounded-full flex items-center justify-center border-4 transition-all duration-300 transform
-                            ${(isPast || isCurrent) && !isWon ? `${color.border} bg-gradient-to-br ${color.bg} shadow-lg ${color.shadow}` : ''}
-                            ${isCurrent && !isWon ? `ring-8 ${color.ring} shadow-2xl scale-110 animate-pulse` : ''}
-                            ${isWon ? 'border-green-500 bg-gradient-to-br from-green-500 to-emerald-600 ring-8 ring-green-200 shadow-2xl shadow-green-500/50 scale-110' : ''}
-                            ${!isPast && !isCurrent && !isWon ? 'border-gray-300 bg-white shadow-md hover:scale-105' : ''}
-                            ${isPast && !isCurrent && !isWon ? 'scale-100' : ''}
-                            group-hover:scale-110
-                          `}
-                        >
-                          <Icon 
-                            className={`h-7 w-7 transition-all ${(isPast || isCurrent || isWon) ? 'text-white' : 'text-gray-400'}`} 
-                          />
-                        </div>
-                        
-                        {/* Checkmark for completed stages */}
-                        {isPast && !isCurrent && !isWon && (
-                          <div className="absolute -top-1 -right-1 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center border-2 border-white shadow-lg">
-                            <CheckCircle className="h-4 w-4 text-white" />
-                          </div>
-                        )}
-                        
-                        {/* Success icon for WON */}
-                        {isWon && (
-                          <div className="absolute -top-2 -right-2 w-8 h-8 bg-yellow-400 rounded-full flex items-center justify-center border-2 border-white shadow-lg animate-bounce">
-                            <span className="text-lg">🎉</span>
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* Stage Label */}
-                      <p className={`
-                        mt-4 text-sm font-bold text-center max-w-[100px] transition-all
-                        ${isCurrent && !isWon ? `${color.text} scale-105` : ''}
-                        ${isWon ? 'text-green-700 scale-105' : ''}
-                        ${isPast && !isCurrent && !isWon ? color.text : ''}
-                        ${!isPast && !isCurrent && !isWon ? 'text-gray-500' : ''}
-                      `}>
-                        {stage.label}
-                      </p>
-                      
-                      {/* Current Badge */}
-                      {isCurrent && !isWon && (
-                        <Badge className={`mt-2 bg-gradient-to-r ${color.bg} text-white border-0 shadow-lg px-3 py-1 animate-pulse`}>
-                          ⚡ Current
-                        </Badge>
-                      )}
-                      
-                      {/* Success Badge */}
-                      {isWon && (
-                        <Badge className="mt-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0 shadow-lg px-3 py-1">
-                          ✨ Success!
-                        </Badge>
-                      )}
-                      
-                      {/* Completed Badge */}
-                      {isPast && !isCurrent && !isWon && (
-                        <Badge className={`mt-2 ${color.badge} border px-2 py-0.5 text-xs`}>
-                          ✓ Done
-                        </Badge>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-              
-              {/* Alternative outcome indicator */}
-              {currentStageIndex >= 3 && offer.stage !== 'WON' && offer.stage !== 'LOST' && (
-                <div className="mt-10 pt-6 border-t-2 border-dashed border-gray-300">
-                  <div className="flex items-center justify-center gap-3 p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl border-2 border-amber-200">
-                    <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0" />
-                    <p className="text-sm text-gray-700 font-medium">
-                      Deal can be marked as <span className="font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded">LOST</span> at any stage if it doesn't close
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column - Details */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Customer & Contact Info */}
-          <Card className="shadow-xl overflow-hidden border-0">
-            <CardHeader className="bg-gradient-to-r from-emerald-600 to-green-600 text-white border-b-0">
-              <CardTitle className="flex items-center gap-2 text-white">
-                <Building2 className="h-6 w-6" />
-                Customer & Contact Information
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6 bg-gradient-to-br from-gray-50 to-white">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-white rounded-xl p-5 shadow-md border border-emerald-100 hover:shadow-lg transition-shadow">
-                  <h4 className="font-bold text-emerald-700 mb-4 flex items-center gap-2 text-lg">
-                    <div className="p-2 bg-emerald-100 rounded-lg">
-                      <Building2 className="h-5 w-5 text-emerald-600" />
-                    </div>
-                    Company Details
-                  </h4>
-                  <dl className="space-y-3">
-                    <div className="flex items-start gap-3">
-                      <div className="w-2 h-2 bg-emerald-500 rounded-full mt-2"></div>
-                      <div className="flex-1">
-                        <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Company Name</dt>
-                        <dd className="text-base font-bold text-gray-900 mt-1">{offer.customer?.companyName || offer.company}</dd>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <div className="w-2 h-2 bg-emerald-500 rounded-full mt-2"></div>
-                      <div className="flex-1">
-                        <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Location</dt>
-                        <dd className="text-base font-medium text-gray-700 mt-1 flex items-center gap-2">
-                          <MapPin className="h-4 w-4 text-emerald-600" />
-                          {offer.location || offer.customer?.city}
-                        </dd>
-                      </div>
-                    </div>
-                    {offer.department && (
-                      <div className="flex items-start gap-3">
-                        <div className="w-2 h-2 bg-emerald-500 rounded-full mt-2"></div>
-                        <div className="flex-1">
-                          <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Department</dt>
-                          <dd className="text-base font-medium text-gray-700 mt-1">{offer.department}</dd>
-                        </div>
-                      </div>
-                    )}
-                    <div className="flex items-start gap-3">
-                      <div className="w-2 h-2 bg-emerald-500 rounded-full mt-2"></div>
-                      <div className="flex-1">
-                        <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Your Zone</dt>
-                        <dd className="mt-2">
-                          <div className="p-4 bg-gradient-to-r from-orange-50 to-amber-50 border-2 border-orange-200 rounded-lg shadow-sm">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="text-lg font-bold text-orange-900">
-                                  {offer.zone?.name || 'N/A'}
-                                </p>
-                                <p className="text-xs text-orange-600 mt-1 font-medium">Your assigned zone</p>
-                              </div>
-                              <div className="text-2xl">🔒</div>
-                            </div>
-                          </div>
-                        </dd>
-                      </div>
-                    </div>
-                  </dl>
-                </div>
-                <div className="bg-white rounded-xl p-5 shadow-md border border-blue-100 hover:shadow-lg transition-shadow">
-                  <h4 className="font-bold text-blue-700 mb-4 flex items-center gap-2 text-lg">
-                    <div className="p-2 bg-blue-100 rounded-lg">
-                      <User className="h-5 w-5 text-blue-600" />
-                    </div>
-                    Contact Person
-                  </h4>
-                  <dl className="space-y-3">
-                    <div className="flex items-start gap-3">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
-                      <div className="flex-1">
-                        <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Name</dt>
-                        <dd className="text-base font-bold text-gray-900 mt-1">{offer.contactPersonName || offer.contact?.contactPersonName}</dd>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
-                      <div className="flex-1">
-                        <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Phone</dt>
-                        <dd className="text-base font-medium text-gray-700 mt-1 flex items-center gap-2">
-                          <Phone className="h-4 w-4 text-blue-600" />
-                          {offer.contactNumber || offer.contact?.contactNumber}
-                        </dd>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
-                      <div className="flex-1">
-                        <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Email</dt>
-                        <dd className="text-base font-medium text-gray-700 mt-1 flex items-center gap-2">
-                          <Mail className="h-4 w-4 text-blue-600" />
-                          {offer.email || offer.contact?.email}
-                        </dd>
-                      </div>
-                    </div>
-                  </dl>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Financial Information */}
-          <Card className="shadow-xl overflow-hidden border-0">
-            <CardHeader className="bg-gradient-to-r from-purple-600 to-pink-600 text-white border-b-0">
-              <CardTitle className="flex items-center gap-2 text-white">
-                <IndianRupee className="h-6 w-6" />
-                Financial Information
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6 bg-gradient-to-br from-gray-50 to-white">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="relative overflow-hidden p-6 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg hover:shadow-2xl transition-all transform hover:scale-105">
-                  <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full -mr-10 -mt-10"></div>
-                  <div className="relative">
-                    <div className="flex items-center gap-2 mb-2">
-                      <DollarSign className="h-5 w-5 text-blue-100" />
-                      <p className="text-sm text-blue-100 font-semibold">Offer Value</p>
-                    </div>
-                    <p className="text-3xl font-bold text-white">
-                      {offer.offerValue ? formatCurrency(Number(offer.offerValue)) : 'TBD'}
-                    </p>
-                  </div>
-                </div>
-                <div className="relative overflow-hidden p-6 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl shadow-lg hover:shadow-2xl transition-all transform hover:scale-105">
-                  <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full -mr-10 -mt-10"></div>
-                  <div className="relative">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Package className="h-5 w-5 text-green-100" />
-                      <p className="text-sm text-green-100 font-semibold">PO Value</p>
-                    </div>
-                    <p className="text-3xl font-bold text-white">
-                      {offer.poValue ? formatCurrency(Number(offer.poValue)) : '-'}
-                    </p>
-                  </div>
-                </div>
-                <div className="relative overflow-hidden p-6 bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl shadow-lg hover:shadow-2xl transition-all transform hover:scale-105">
-                  <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full -mr-10 -mt-10"></div>
-                  <div className="relative">
-                    <div className="flex items-center gap-2 mb-2">
-                      <TrendingUp className="h-5 w-5 text-purple-100" />
-                      <p className="text-sm text-purple-100 font-semibold">Win Probability</p>
-                    </div>
-                    <p className="text-3xl font-bold text-white">
-                      {offer.probabilityPercentage ? `${offer.probabilityPercentage}%` : '-'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                <div className="bg-white rounded-lg p-4 shadow-md border border-gray-200">
-                  <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-2">Offer Month</dt>
-                  <dd className="text-base font-bold text-gray-900 flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-blue-600" />
-                    {offer.offerMonth || '-'}
-                  </dd>
-                </div>
-                <div className="bg-white rounded-lg p-4 shadow-md border border-gray-200">
-                  <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-2">PO Expected Month</dt>
-                  <dd className="text-base font-bold text-gray-900 flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-green-600" />
-                    {offer.poExpectedMonth || '-'}
-                  </dd>
-                </div>
-                <div className="bg-white rounded-lg p-4 shadow-md border border-gray-200">
-                  <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-2">PO Number</dt>
-                  <dd className="text-base font-bold text-gray-900">{offer.poNumber || '-'}</dd>
-                </div>
-              </div>
-
-              {offer.poDate && (
-                <div className="mt-4 bg-white rounded-lg p-4 shadow-md border border-gray-200">
-                  <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-2">PO Date</dt>
-                  <dd className="text-base font-bold text-gray-900 flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-purple-600" />
-                    {new Date(offer.poDate).toLocaleDateString('en-IN')}
-                  </dd>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Product & Assets */}
-          <Card className="shadow-xl overflow-hidden border-0">
-            <CardHeader className="bg-gradient-to-r from-orange-600 to-red-600 text-white border-b-0">
-              <CardTitle className="flex items-center gap-2 text-white">
-                <Package className="h-6 w-6" />
-                Product & Asset Information
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6 bg-gradient-to-br from-gray-50 to-white">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-white rounded-xl p-5 shadow-md border border-orange-100 hover:shadow-lg transition-shadow">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="p-2 bg-orange-100 rounded-lg">
-                      <Package className="h-5 w-5 text-orange-600" />
-                    </div>
-                    <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Product Type</dt>
-                  </div>
-                  <dd>
-                    <Badge className={`
-                      text-sm px-3 py-1.5 font-bold
-                      ${offer.productType === 'SPP' ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white border-0 shadow-lg' : ''}
-                      ${offer.productType === 'CONTRACT' ? 'bg-gradient-to-r from-green-500 to-green-600 text-white border-0 shadow-lg' : ''}
-                      ${offer.productType === 'RELOCATION' ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0 shadow-lg' : ''}
-                      ${offer.productType === 'UPGRADE_KIT' ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white border-0 shadow-lg' : ''}
-                      ${offer.productType === 'SOFTWARE' ? 'bg-gradient-to-r from-indigo-500 to-indigo-600 text-white border-0 shadow-lg' : ''}
-                      ${offer.productType === 'MIDLIFE_UPGRADE' ? 'bg-gradient-to-r from-teal-500 to-teal-600 text-white border-0 shadow-lg' : ''}
-                      ${offer.productType === 'RETROFIT_KIT' ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white border-0 shadow-lg' : ''}
-                      ${offer.productType === 'BD_CHARGES' ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-white border-0 shadow-lg' : ''}
-                      ${offer.productType === 'BD_SPARE' ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white border-0 shadow-lg' : ''}
-                    `}>
-                      {offer.productType?.replace(/_/g, ' ')}
-                    </Badge>
-                  </dd>
-                </div>
-                <div className="bg-white rounded-xl p-5 shadow-md border border-blue-100 hover:shadow-lg transition-shadow">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="p-2 bg-blue-100 rounded-lg">
-                      <Wrench className="h-5 w-5 text-blue-600" />
-                    </div>
-                    <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Machine Serial Number</dt>
-                  </div>
-                  <dd className="text-base font-bold text-gray-900">{offer.machineSerialNumber || '-'}</dd>
-                </div>
-                {offer.title && (
-                  <div className="md:col-span-2 bg-white rounded-xl p-5 shadow-md border border-purple-100 hover:shadow-lg transition-shadow">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="p-2 bg-purple-100 rounded-lg">
-                        <FileText className="h-5 w-5 text-purple-600" />
-                      </div>
-                      <dt className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Offer Title</dt>
-                    </div>
-                    <dd className="text-base font-bold text-gray-900">{offer.title}</dd>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Spare Parts - Show for SPP or if parts exist */}
-          {(offer.productType === 'SPP' || (offer.offerSpareParts && offer.offerSpareParts.length > 0)) && (
-            <Card className={`shadow-lg ${offer.productType === 'SPP' ? 'ring-2 ring-amber-200' : ''}`}>
-              <CardHeader className="bg-gradient-to-r from-amber-50 via-yellow-50 to-orange-50">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <Wrench className="h-5 w-5 text-amber-600" />
-                      Spare Parts
-                      {offer.offerSpareParts && offer.offerSpareParts.length > 0 && (
-                        <Badge className="bg-amber-600 text-white">
-                          {offer.offerSpareParts.length} {offer.offerSpareParts.length === 1 ? 'Item' : 'Items'}
-                        </Badge>
-                      )}
-                    </CardTitle>
-                    <CardDescription>
-                      {offer.productType === 'SPP' 
-                        ? 'Spare parts configured for this SPP offer' 
-                        : 'Items included in this offer'}
-                    </CardDescription>
-                  </div>
-                  {offer.productType === 'SPP' && (
-                    <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-300">
-                      SPP Product
-                    </Badge>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="pt-6">
-                {(!offer.offerSpareParts || offer.offerSpareParts.length === 0) && offer.productType === 'SPP' ? (
-                  <div className="text-center py-12">
-                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-amber-100 mb-4">
-                      <Wrench className="h-8 w-8 text-amber-600" />
-                    </div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">No Spare Parts Added Yet</h3>
-                    <p className="text-gray-600 mb-6 max-w-md mx-auto">
-                      This is an SPP (Spare Parts) offer. Add spare parts to complete the offer details.
-                    </p>
-                    <Button 
-                      onClick={() => router.push(`/admin/offers/${offer.id}/edit`)}
-                      className="bg-amber-600 hover:bg-amber-700"
-                    >
-                      <Wrench className="h-4 w-4 mr-2" />
-                      Add Spare Parts
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {offer.offerSpareParts?.map((offerPart: any, index: number) => {
-                        const part = offerPart.sparePart;
-                        return (
-                          <div 
-                            key={offerPart.id || index} 
-                            className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow bg-white"
-                          >
-                        {/* Image */}
-                        <div className="w-full h-40 bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg mb-3 flex items-center justify-center overflow-hidden">
-                          {part?.imageUrl ? (
-                            <img 
-                              src={part.imageUrl} 
-                              alt={part.name || 'Spare Part'}
-                              className="w-full h-full object-cover"
-                              onError={(e) => {
-                                e.currentTarget.style.display = 'none';
-                                e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                              }}
-                            />
-                          ) : null}
-                          <div className={part?.imageUrl ? 'hidden' : 'flex flex-col items-center justify-center text-gray-400'}>
-                            <ImageIcon className="h-12 w-12 mb-2" />
-                            <span className="text-xs">No Image</span>
-                          </div>
-                        </div>
-
-                        {/* Part Details */}
-                        <div className="space-y-2">
-                          {/* Part Name */}
-                          <h4 className="font-semibold text-gray-900 text-base line-clamp-2">
-                            {part?.name || 'Unnamed Part'}
-                          </h4>
-
-                          {/* Part Number */}
-                          {part?.partNumber && (
-                            <p className="text-xs text-gray-500">
-                              Part #: {part.partNumber}
-                            </p>
-                          )}
-
-                          {/* Category */}
-                          {part?.category && (
-                            <Badge variant="outline" className="text-xs">
-                              {part.category}
-                            </Badge>
-                          )}
-
-                          {/* Quantity */}
-                          {offerPart.quantity && (
-                            <p className="text-sm text-gray-600">
-                              Qty: <span className="font-medium">{offerPart.quantity}</span>
-                            </p>
-                          )}
-
-                          {/* Price */}
-                          <div className="pt-2 border-t border-gray-100">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm text-gray-500">Unit Price</span>
-                              <div className="flex items-center gap-1">
-                                <IndianRupee className="h-4 w-4 text-green-600" />
-                                <span className="text-lg font-bold text-green-600">
-                                  {offerPart.unitPrice ? 
-                                    formatCurrency(Number(offerPart.unitPrice)) : 
-                                    <span className="text-sm text-gray-400">TBD</span>
-                                  }
-                                </span>
-                              </div>
-                            </div>
-                            
-                            {/* Total Price */}
-                            {offerPart.totalPrice && (
-                              <div className="flex items-center justify-between mt-1">
-                                <span className="text-xs text-gray-500">Total</span>
-                                <span className="text-sm font-semibold text-gray-900">
-                                  {formatCurrency(Number(offerPart.totalPrice))}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Notes if available */}
-                          {offerPart.notes && (
-                            <p className="text-xs text-gray-600 line-clamp-2 pt-2">
-                              {offerPart.notes}
-                            </p>
-                          )}
-
-                          {/* Description if available */}
-                          {part?.description && (
-                            <p className="text-xs text-gray-500 line-clamp-2 pt-1">
-                              {part.description}
-                            </p>
-                            )}
-                          </div>
-                        </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Total Summary */}
-                    {offer.offerSpareParts && offer.offerSpareParts.some((op: any) => op.totalPrice) && (
-                      <div className="mt-6 p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg border border-green-200">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium text-gray-700">Total Parts Value</span>
-                          <span className="text-xl font-bold text-green-700">
-                            {formatCurrency(
-                              offer.offerSpareParts.reduce((sum: number, offerPart: any) => {
-                                return sum + Number(offerPart.totalPrice || 0);
-                              }, 0)
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Stage-wise Remarks History - Timeline Design */}
-          {offer.stageRemarks && offer.stageRemarks.length > 0 && (
-            <Card className="shadow-lg overflow-hidden">
-              <CardHeader className="bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 border-b border-indigo-100">
-                <CardTitle className="flex items-center gap-2">
-                  <Clock className="h-5 w-5 text-indigo-600" />
-                  Stage Activity Timeline
-                </CardTitle>
-                <CardDescription>
-                  Complete history of remarks and notes across all stages
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-6 pb-8">
-                <div className="relative">
-                  {/* Timeline vertical line */}
-                  <div className="absolute left-6 top-0 bottom-0 w-0.5 bg-gradient-to-b from-indigo-200 via-purple-200 to-pink-200"></div>
-                  
-                  <div className="space-y-6">
-                    {offer.stageRemarks.map((remark: any, index: number) => {
-                      const stageInfo = STAGE_INFO[remark.stage] || {};
-                      const stageName = ALL_STAGES.find(s => s.key === remark.stage)?.label || remark.stage;
-                      
-                      // Color mapping for stages
-                      const colorClasses = {
-                        blue: 'bg-blue-500 ring-blue-200',
-                        indigo: 'bg-indigo-500 ring-indigo-200',
-                        amber: 'bg-amber-500 ring-amber-200',
-                        purple: 'bg-purple-500 ring-purple-200',
-                        green: 'bg-green-500 ring-green-200',
-                        teal: 'bg-teal-500 ring-teal-200',
-                        red: 'bg-red-500 ring-red-200'
-                      };
-                      
-                      const bgClasses = {
-                        blue: 'from-blue-50 to-blue-100/50',
-                        indigo: 'from-indigo-50 to-indigo-100/50',
-                        amber: 'from-amber-50 to-amber-100/50',
-                        purple: 'from-purple-50 to-purple-100/50',
-                        green: 'from-green-50 to-green-100/50',
-                        teal: 'from-teal-50 to-teal-100/50',
-                        red: 'from-red-50 to-red-100/50'
-                      };
-                      
-                      const textClasses = {
-                        blue: 'text-blue-700',
-                        indigo: 'text-indigo-700',
-                        amber: 'text-amber-700',
-                        purple: 'text-purple-700',
-                        green: 'text-green-700',
-                        teal: 'text-teal-700',
-                        red: 'text-red-700'
-                      };
-                      
-                      const color = stageInfo.color || 'blue';
-                      
-                      return (
-                        <div key={remark.id} className="relative pl-16">
-                          {/* Timeline dot */}
-                          <div className={`absolute left-3.5 top-3 w-5 h-5 rounded-full ${colorClasses[color as keyof typeof colorClasses] || 'bg-gray-500 ring-gray-200'} ring-4 shadow-md`}></div>
-                          
-                          {/* Content card */}
-                          <div className={`bg-gradient-to-br ${bgClasses[color as keyof typeof bgClasses] || 'from-gray-50 to-gray-100/50'} rounded-lg p-4 shadow-sm border border-gray-200 hover:shadow-md transition-shadow`}>
-                            {/* Header */}
-                            <div className="flex items-start justify-between mb-3">
-                              <div className="flex items-center gap-3">
-                                <span className="text-2xl">{stageInfo.icon || '📝'}</span>
-                                <div>
-                                  <h4 className={`font-bold text-base ${textClasses[color as keyof typeof textClasses] || 'text-gray-700'}`}>
-                                    {stageName}
-                                  </h4>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <Calendar className="h-3 w-3 text-gray-500" />
-                                    <p className="text-xs text-gray-600 font-medium">
-                                      {new Date(remark.createdAt).toLocaleDateString('en-IN', {
-                                        day: 'numeric',
-                                        month: 'short',
-                                        year: 'numeric',
-                                        hour: '2-digit',
-                                        minute: '2-digit'
-                                      })}
-                                    </p>
-                                  </div>
-                                </div>
-                              </div>
-                              {remark.createdBy?.name && (
-                                <div className="flex items-center gap-1.5 bg-white/80 px-3 py-1.5 rounded-full border border-gray-200">
-                                  <User className="h-3 w-3 text-gray-500" />
-                                  <span className="text-xs font-medium text-gray-700">
-                                    {remark.createdBy.name}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                            
-                            {/* Remarks content */}
-                            <div className="bg-white rounded-md p-4 shadow-sm border border-gray-200">
-                              <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">
-                                {remark.remarks}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-          
-          {/* Legacy Remarks - Show if no stage remarks but has old remarks field */}
-          {(!offer.stageRemarks || offer.stageRemarks.length === 0) && offer.remarks && (
-            <Card className="shadow-lg">
-              <CardHeader>
-                <CardTitle>Remarks & Notes</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="bg-gray-50 p-4 rounded-lg whitespace-pre-wrap text-sm">
-                  {offer.remarks}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-
-        {/* Right Column - Summary & Actions */}
-        <div className="space-y-6">
-          {/* Quick Stats */}
-          <Card className="shadow-xl overflow-hidden border-0">
-            <CardHeader className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white border-b-0">
-              <CardTitle className="text-white flex items-center gap-2">
-                <TrendingUp className="h-5 w-5" />
-                Quick Stats
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6 space-y-3 bg-gradient-to-br from-gray-50 to-white">
-              <div className="bg-white rounded-lg p-4 shadow-md border border-gray-200 hover:shadow-lg transition-shadow">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Priority</p>
-                  <AlertCircle className="h-4 w-4 text-gray-400" />
-                </div>
-                <Badge className={`
-                  text-sm px-3 py-1.5 font-bold
-                  ${offer.priority === 'CRITICAL' ? 'bg-gradient-to-r from-red-500 to-red-600 text-white border-0 shadow-lg' : ''}
-                  ${offer.priority === 'HIGH' ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white border-0 shadow-lg' : ''}
-                  ${offer.priority === 'MEDIUM' ? 'bg-gradient-to-r from-yellow-500 to-yellow-600 text-white border-0 shadow-lg' : ''}
-                  ${offer.priority === 'LOW' ? 'bg-gradient-to-r from-green-500 to-green-600 text-white border-0 shadow-lg' : ''}
-                `}>
-                  {offer.priority}
-                </Badge>
-              </div>
-              <div className="bg-white rounded-lg p-4 shadow-md border border-gray-200 hover:shadow-lg transition-shadow">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Lead Status</p>
-                  <User className="h-4 w-4 text-gray-400" />
-                </div>
-                <Badge className={`text-sm px-3 py-1.5 font-bold ${
-                  offer.lead === 'YES' 
-                    ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0 shadow-lg' 
-                    : 'bg-gray-200 text-gray-700 border border-gray-300'
-                }`}>
-                  {offer.lead === 'YES' ? '✓ Yes' : 'No'}
-                </Badge>
-              </div>
-              <div className="bg-white rounded-lg p-4 shadow-md border border-gray-200 hover:shadow-lg transition-shadow">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Open Funnel</p>
-                  <Package className="h-4 w-4 text-gray-400" />
-                </div>
-                <Badge className={`text-sm px-3 py-1.5 font-bold ${
-                  offer.openFunnel 
-                    ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-0 shadow-lg' 
-                    : 'bg-gray-200 text-gray-700 border border-gray-300'
-                }`}>
-                  {offer.openFunnel ? '✓ Active' : 'Closed'}
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Timeline */}
-          <Card className="shadow-xl overflow-hidden border-0">
-            <CardHeader className="bg-gradient-to-r from-cyan-600 to-blue-600 text-white border-b-0">
-              <CardTitle className="flex items-center gap-2 text-white">
-                <Clock className="h-5 w-5" />
-                Timeline
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6 space-y-3 bg-gradient-to-br from-gray-50 to-white">
-              <div className="bg-white rounded-lg p-4 shadow-md border-l-4 border-blue-500 hover:shadow-lg transition-shadow">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="p-1.5 bg-blue-100 rounded-full">
-                    <Calendar className="h-3.5 w-3.5 text-blue-600" />
-                  </div>
-                  <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Created</p>
-                </div>
-                <p className="text-base font-bold text-gray-900">
-                  {new Date(offer.createdAt).toLocaleDateString('en-IN', {
-                    day: 'numeric',
-                    month: 'short',
-                    year: 'numeric'
-                  })}
-                </p>
-                {offer.createdBy?.name && (
-                  <div className="flex items-center gap-1.5 mt-2">
-                    <User className="h-3 w-3 text-gray-400" />
-                    <p className="text-xs text-gray-600 font-medium">{offer.createdBy.name}</p>
-                  </div>
-                )}
-              </div>
-              <div className="bg-white rounded-lg p-4 shadow-md border-l-4 border-green-500 hover:shadow-lg transition-shadow">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="p-1.5 bg-green-100 rounded-full">
-                    <Clock className="h-3.5 w-3.5 text-green-600" />
-                  </div>
-                  <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Last Updated</p>
-                </div>
-                <p className="text-base font-bold text-gray-900">
-                  {new Date(offer.updatedAt).toLocaleDateString('en-IN', {
-                    day: 'numeric',
-                    month: 'short',
-                    year: 'numeric'
-                  })}
-                </p>
-              </div>
-              {offer.offerReferenceDate && (
-                <div className="bg-white rounded-lg p-4 shadow-md border-l-4 border-purple-500 hover:shadow-lg transition-shadow">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="p-1.5 bg-purple-100 rounded-full">
-                      <FileText className="h-3.5 w-3.5 text-purple-600" />
-                    </div>
-                    <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Offer Reference</p>
-                  </div>
-                  <p className="text-base font-bold text-gray-900">
-                    {new Date(offer.offerReferenceDate).toLocaleDateString('en-IN')}
-                  </p>
-                </div>
-              )}
-              {offer.registrationDate && (
-                <div className="bg-white rounded-lg p-4 shadow-md border-l-4 border-orange-500 hover:shadow-lg transition-shadow">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="p-1.5 bg-orange-100 rounded-full">
-                      <Building2 className="h-3.5 w-3.5 text-orange-600" />
-                    </div>
-                    <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Registration</p>
-                  </div>
-                  <p className="text-base font-bold text-gray-900">
-                    {new Date(offer.registrationDate).toLocaleDateString('en-IN')}
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Actions */}
-          <Card className="shadow-xl overflow-hidden border-0">
-            <CardHeader className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-b-0">
-              <CardTitle className="text-white flex items-center gap-2">
-                <CheckCircle className="h-5 w-5" />
-                Quick Actions
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 pt-6 bg-gradient-to-br from-gray-50 to-white">
-              <Button 
-                className="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white border-0 shadow-lg hover:shadow-xl transition-all transform hover:scale-105 font-semibold py-6" 
-                onClick={() => {
-                  const nextStageIndex = currentStageIndex + 1
-                  if (nextStageIndex < STAGES.length) {
-                    handleMoveToStage(STAGES[nextStageIndex].key)
-                  }
-                }}
-                disabled={currentStageIndex >= STAGES.length - 1}
-              >
-                <CheckCircle className="h-5 w-5 mr-2" />
-                Move to Next Stage
-              </Button>
-              <Button 
-                className="w-full bg-white hover:bg-gray-50 text-gray-900 border-2 border-gray-300 hover:border-blue-500 shadow-md hover:shadow-lg transition-all font-semibold py-5" 
-                onClick={() => setShowUpdateDialog(true)}
-              >
-                <Edit className="h-4 w-4 mr-2 text-blue-600" />
-                Update Stage Details
-              </Button>
-              <Button 
-                className="w-full bg-white hover:bg-gray-50 text-gray-900 border-2 border-gray-300 hover:border-purple-500 shadow-md hover:shadow-lg transition-all font-semibold py-5"
-                onClick={() => router.push(`/admin/offers/${params.id}/quote`)}
-              >
-                <FileText className="h-4 w-4 mr-2 text-purple-600" />
-                Generate Quote
-              </Button>
-              <Button 
-                className="w-full bg-white hover:bg-gray-50 text-gray-900 border-2 border-gray-300 hover:border-indigo-500 shadow-md hover:shadow-lg transition-all font-semibold py-5"
-                onClick={() => router.push(`/admin/offers/${params.id}/activity`)}
-              >
-                <Clock className="h-4 w-4 mr-2 text-indigo-600" />
-                View Activity History
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      {/* Update Dialog */}
-      <Dialog open={showUpdateDialog} onOpenChange={setShowUpdateDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Update Offer Details</DialogTitle>
-            <DialogDescription>
-              Update offer information for {offer?.offerReferenceNumber}
-            </DialogDescription>
-          </DialogHeader>
-          
-          {/* Stage-specific context banner */}
-          {updateData.stage && STAGE_INFO[updateData.stage] && (
-            <div className={`
-              p-4 rounded-lg border-l-4 mb-4
-              ${STAGE_INFO[updateData.stage].color === 'blue' ? 'bg-blue-50 border-blue-500' : ''}
-              ${STAGE_INFO[updateData.stage].color === 'indigo' ? 'bg-indigo-50 border-indigo-500' : ''}
-              ${STAGE_INFO[updateData.stage].color === 'amber' ? 'bg-amber-50 border-amber-500' : ''}
-              ${STAGE_INFO[updateData.stage].color === 'purple' ? 'bg-purple-50 border-purple-500' : ''}
-              ${STAGE_INFO[updateData.stage].color === 'green' ? 'bg-green-50 border-green-500' : ''}
-              ${STAGE_INFO[updateData.stage].color === 'teal' ? 'bg-teal-50 border-teal-500' : ''}
-              ${STAGE_INFO[updateData.stage].color === 'red' ? 'bg-red-50 border-red-500' : ''}
-            `}>
-              <div className="flex items-start gap-3">
-                <span className="text-2xl">{STAGE_INFO[updateData.stage].icon}</span>
-                <div className="flex-1">
-                  <h4 className="font-semibold text-gray-900 mb-1">
-                    {STAGES.find(s => s.key === updateData.stage)?.label} Stage
-                  </h4>
-                  <p className="text-sm text-gray-700">
-                    {STAGE_INFO[updateData.stage].description}
-                  </p>
-                  {STAGE_INFO[updateData.stage].requiresAllFields && (
-                    <p className="text-xs text-red-600 mt-2 font-medium">
-                      ⚠️ All fields marked with * are required for this stage
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-          
-          <div className="space-y-4">
-            {/* Stage */}
-            <div className="space-y-2">
-              <Label className="text-red-600">Stage *</Label>
-              <Select 
-                value={updateData.stage} 
-                onValueChange={(value) => setUpdateData(prev => ({ ...prev, stage: value }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ALL_STAGES.map(stage => (
-                    <SelectItem key={stage.key} value={stage.key}>
-                      {stage.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Offer Title */}
-            <div className="space-y-2">
-              <Label className="text-red-600">Offer Title *</Label>
-              <Input 
-                value={updateData.title}
-                onChange={(e) => setUpdateData(prev => ({ ...prev, title: e.target.value }))}
-                placeholder="Enter offer title"
-              />
-            </div>
-
-            {/* Offer Reference Date */}
-            <div className="space-y-2">
-              <Label className={updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields ? 'text-red-600' : ''}>
-                Offer Reference Date {updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields && '*'}
-              </Label>
-              <Input 
-                type="date"
-                value={updateData.offerReferenceDate}
-                onChange={(e) => setUpdateData(prev => ({ ...prev, offerReferenceDate: e.target.value }))}
-                className={updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields && !updateData.offerReferenceDate ? 'border-red-300' : ''}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              {/* Offer Value */}
-              <div className="space-y-2">
-                <Label className={updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields ? 'text-red-600' : ''}>
-                  Offer Value (₹) {updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields && '*'}
-                </Label>
-                <Input 
-                  type="number"
-                  value={updateData.offerValue}
-                  onChange={(e) => setUpdateData(prev => ({ ...prev, offerValue: e.target.value }))}
-                  placeholder="Enter amount"
-                  className={updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields && !updateData.offerValue ? 'border-red-300' : ''}
-                />
-              </div>
-
-              {/* Win Probability */}
-              <div className="space-y-2">
-                <Label className={updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields ? 'text-red-600' : ''}>
-                  Win Probability (%) {updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields && '*'}
-                </Label>
-                <Input 
-                  type="number"
-                  min="1"
-                  max="100"
-                  value={updateData.probabilityPercentage}
-                  onChange={(e) => setUpdateData(prev => ({ ...prev, probabilityPercentage: e.target.value }))}
-                  placeholder="1-100"
-                  className={updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields && !updateData.probabilityPercentage ? 'border-red-300' : ''}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              {/* Offer Month */}
-              <div className="space-y-2">
-                <Label className={updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields ? 'text-red-600' : ''}>
-                  Offer Month {updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields && '*'}
-                </Label>
-                <Input 
-                  type="month"
-                  value={updateData.offerMonth}
-                  onChange={(e) => setUpdateData(prev => ({ ...prev, offerMonth: e.target.value }))}
-                  className={updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields && !updateData.offerMonth ? 'border-red-300' : ''}
-                />
-              </div>
-
-              {/* PO Expected Month */}
-              <div className="space-y-2">
-                <Label className={updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields ? 'text-red-600' : ''}>
-                  PO Expected Month {updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields && '*'}
-                </Label>
-                <Input 
-                  type="month"
-                  value={updateData.poExpectedMonth}
-                  onChange={(e) => setUpdateData(prev => ({ ...prev, poExpectedMonth: e.target.value }))}
-                  className={updateData.stage && STAGE_INFO[updateData.stage]?.requiresAllFields && !updateData.poExpectedMonth ? 'border-red-300' : ''}
-                />
-              </div>
-            </div>
-            
-            {/* PO Details Section - For PO_RECEIVED, ORDER_BOOKED, WON stages */}
-            {(updateData.stage === 'PO_RECEIVED' || updateData.stage === 'ORDER_BOOKED' || updateData.stage === 'WON') && (
-              <div className="space-y-4 pt-4 border-t">
-                <div className="flex items-center gap-2 mb-2">
-                  <Package className="h-5 w-5 text-green-600" />
-                  <h3 className="font-semibold text-gray-900">Purchase Order Details</h3>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  {/* PO Number */}
-                  <div className="space-y-2">
-                    <Label className="text-red-600">PO Number *</Label>
-                    <Input 
-                      value={updateData.poNumber}
-                      onChange={(e) => setUpdateData(prev => ({ ...prev, poNumber: e.target.value }))}
-                      placeholder="Enter PO number"
-                      className={!updateData.poNumber ? 'border-red-300' : ''}
-                    />
-                  </div>
-
-                  {/* PO Date */}
-                  <div className="space-y-2">
-                    <Label className="text-red-600">PO Date *</Label>
-                    <Input 
-                      type="date"
-                      value={updateData.poDate}
-                      onChange={(e) => setUpdateData(prev => ({ ...prev, poDate: e.target.value }))}
-                      className={!updateData.poDate ? 'border-red-300' : ''}
-                    />
-                  </div>
-                </div>
-
-                {/* PO Value */}
-                <div className="space-y-2">
-                  <Label className="text-red-600">PO Value (₹) *</Label>
-                  <Input 
-                    type="number"
-                    value={updateData.poValue}
-                    onChange={(e) => setUpdateData(prev => ({ ...prev, poValue: e.target.value }))}
-                    placeholder="Enter PO value"
-                    className={!updateData.poValue ? 'border-red-300' : ''}
-                  />
-                  <p className="text-xs text-gray-500">
-                    Actual purchase order value received from customer
-                  </p>
-                </div>
-              </div>
-            )}
-            
-            {/* Order Booking Details Section - For ORDER_BOOKED and WON stages */}
-            {(updateData.stage === 'ORDER_BOOKED' || updateData.stage === 'WON') && (
-              <div className="space-y-4 pt-4 border-t">
-                <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle className="h-5 w-5 text-teal-600" />
-                  <h3 className="font-semibold text-gray-900">Order Booking Details</h3>
-                </div>
-                
-                {/* Booking Date in SAP */}
-                <div className="space-y-2">
-                  <Label className="text-red-600">Booking Date in SAP *</Label>
-                  <Input 
-                    type="date"
-                    value={updateData.bookingDateInSap}
-                    onChange={(e) => setUpdateData(prev => ({ ...prev, bookingDateInSap: e.target.value }))}
-                    className={!updateData.bookingDateInSap ? 'border-red-300' : ''}
-                  />
-                  <p className="text-xs text-gray-500">
-                    Date when the order was booked in SAP system
-                  </p>
-                </div>
-              </div>
-            )}
-            
-            {/* Loss Reason Section - For LOST stage */}
-            {updateData.stage === 'LOST' && (
-              <div className="space-y-3 pt-4 border-t-4 border-red-300 bg-red-50 p-4 rounded-lg">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
-                  <div className="flex-1">
-                    <Label className="text-red-700 font-semibold text-base">
-                      ❌ Reason for Loss *
-                    </Label>
-                    <p className="text-xs text-red-600 mt-1">
-                      This deal can be marked as LOST from any stage (Proposal Sent, Negotiation, Final Approval) if PO is not received
-                    </p>
-                  </div>
-                </div>
-                <Textarea
-                  value={updateData.remarks}
-                  onChange={(e) => setUpdateData(prev => ({ ...prev, remarks: e.target.value }))}
-                  placeholder="Document why the deal was lost: competitor won, pricing issues, customer delayed, requirements changed, budget constraints, etc."
-                  rows={5}
-                  className="resize-none border-red-300 focus:border-red-500"
-                />
-                <p className="text-xs text-red-700 font-medium bg-red-100 p-2 rounded">
-                  ⚠️ Important: Documenting loss reasons helps improve future proposals and understand customer objections
-                </p>
-              </div>
-            )}
-            
-            {/* Remarks/Notes Section - Especially for Negotiation and Final Approval */}
-            {(updateData.stage === 'NEGOTIATION' || updateData.stage === 'FINAL_APPROVAL' || updateData.stage === 'PROPOSAL_SENT') && (
-              <div className="space-y-3 pt-4 border-t-2 border-indigo-100">
-                {/* Show previous stage remarks if any */}
-                {offer.stageRemarks && offer.stageRemarks.filter((r: any) => r.stage === updateData.stage).length > 0 && (
-                  <div className="mb-4 p-4 bg-gradient-to-br from-indigo-50 to-purple-50 border-2 border-indigo-200 rounded-xl shadow-sm">
-                    <div className="flex items-center gap-2 mb-3">
-                      <Clock className="h-4 w-4 text-indigo-600" />
-                      <p className="text-sm font-bold text-indigo-900">Previous Activity for {ALL_STAGES.find(s => s.key === updateData.stage)?.label}</p>
-                    </div>
-                    <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-                      {offer.stageRemarks
-                        .filter((r: any) => r.stage === updateData.stage)
-                        .slice(0, 5)
-                        .map((r: any) => (
-                          <div key={r.id} className="bg-white p-3 rounded-lg border border-indigo-100 shadow-sm hover:shadow-md transition-shadow">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <Calendar className="h-3 w-3 text-indigo-500" />
-                                <p className="text-xs text-indigo-700 font-semibold">
-                                  {new Date(r.createdAt).toLocaleDateString('en-IN', { 
-                                    day: 'numeric', 
-                                    month: 'short',
-                                    year: 'numeric',
-                                    hour: '2-digit', 
-                                    minute: '2-digit' 
-                                  })}
-                                </p>
-                              </div>
-                              {r.createdBy?.name && (
-                                <div className="flex items-center gap-1 bg-indigo-100 px-2 py-0.5 rounded-full">
-                                  <User className="h-3 w-3 text-indigo-600" />
-                                  <span className="text-xs font-medium text-indigo-700">{r.createdBy.name}</span>
-                                </div>
-                              )}
-                            </div>
-                            <p className="text-xs text-gray-700 leading-relaxed line-clamp-3">{r.remarks}</p>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                )}
-                
-                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-4 rounded-xl border-2 border-blue-200">
-                  <Label className="text-blue-700 font-bold text-base flex items-center gap-2 mb-2">
-                    {updateData.stage === 'NEGOTIATION' && (
-                      <>
-                        <span className="text-xl">💬</span>
-                        Add New Negotiation Notes
-                      </>
-                    )}
-                    {updateData.stage === 'FINAL_APPROVAL' && (
-                      <>
-                        <span className="text-xl">✅</span>
-                        Add New Approval Notes & Conditions
-                      </>
-                    )}
-                    {updateData.stage === 'PROPOSAL_SENT' && (
-                      <>
-                        <span className="text-xl">📋</span>
-                        Add Proposal Notes
-                      </>
-                    )}
-                  </Label>
-                  <Textarea
-                    value={updateData.remarks}
-                    onChange={(e) => setUpdateData(prev => ({ ...prev, remarks: e.target.value }))}
-                    placeholder={
-                      updateData.stage === 'NEGOTIATION' 
-                        ? 'Document discussion points, pricing negotiations, customer objections, competitor info, etc.'
-                        : updateData.stage === 'FINAL_APPROVAL'
-                        ? 'Document decision makers, approval timeline, final terms, conditions, commitments, etc.'
-                        : 'Add any notes about this stage...'
-                    }
-                    rows={5}
-                    className="resize-none bg-white border-blue-300 focus:border-blue-500 focus:ring-blue-500 shadow-sm"
-                  />
-                  <div className="flex items-start gap-2 mt-2 p-2 bg-blue-100 rounded-lg">
-                    <AlertCircle className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                    <p className="text-xs text-blue-700 leading-relaxed">
-                      {updateData.stage === 'NEGOTIATION' && 'Each update creates a new timeline entry. All previous negotiation notes are preserved in the activity history.'}
-                      {updateData.stage === 'FINAL_APPROVAL' && 'Each update creates a new timeline entry. All previous approval notes are preserved in the activity history.'}
-                      {updateData.stage === 'PROPOSAL_SENT' && 'Optional notes about the proposal. These will be saved in the activity timeline.'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowUpdateDialog(false)} disabled={updating}>
-              Cancel
-            </Button>
-            <Button onClick={handleUpdateOffer} disabled={updating}>
-              {updating ? (
+          <div className="flex gap-2">
+            <Button 
+              onClick={handleToggleEditMode}
+              variant={isEditMode ? "default" : "outline"}
+            >
+              {isEditMode ? (
                 <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Updating...
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Changes
                 </>
               ) : (
-                'Update Offer'
+                <>
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit Quote
+                </>
               )}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <Button onClick={handlePrint} variant="outline" disabled={isEditMode}>
+              <Printer className="h-4 w-4 mr-2" />
+              Print
+            </Button>
+            <Button onClick={handleDownloadPDF} variant="outline" disabled={isEditMode}>
+              <Download className="h-4 w-4 mr-2" />
+              Download PDF
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Quotation Document */}
+      <div ref={printRef} className="quotation-document">
+        <div className="document-container">
+          {/* Page 1 - Main Quote */}
+          <div className="page page-1">
+            {/* Logo */}
+            <KardexLogo />
+
+            <div className="page-content">
+              {/* Title - Centered and Underlined */}
+              <div className="page-title">
+                <h1><span className="bg-gradient-to-r from-blue-100 to-blue-200 px-4 py-2 rounded-lg shadow-sm border border-blue-300">Kardex Remstar Spare Parts Package</span></h1>
+              </div>
+
+              {/* Header */}
+              <div className="quote-header">
+                <div className="hidden">
+                  {isEditMode ? (
+                    <Input
+                      value={editableData.title}
+                      onChange={(e) => setEditableData({...editableData, title: e.target.value})}
+                      className="text-center text-2xl font-bold"
+                      placeholder="Quotation Title"
+                    />
+                  ) : (
+                    <h1 className="text-3xl font-bold text-gray-900 mb-2">{editableData.title || 'Quotation'}</h1>
+                  )}
+                </div>
+
+                <div className="header-info">
+                  <div>
+                    <div className="flex gap-2 mb-1">
+                      <span className="font-semibold">Ref:</span>
+                      <span>{offer.offerReferenceNumber}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="font-semibold">Dated:</span>
+                      <span>{format(quoteDate, 'dd/MM/yyyy')}</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    {isEditMode ? (
+                      <div className="space-y-1">
+                        <Input
+                          value={editableData.gstNumber}
+                          onChange={(e) => setEditableData({...editableData, gstNumber: e.target.value})}
+                          className="text-right text-xs h-7"
+                          placeholder="GST Number"
+                        />
+                        <Input
+                          value={editableData.arnNumber}
+                          onChange={(e) => setEditableData({...editableData, arnNumber: e.target.value})}
+                          className="text-right text-xs h-7"
+                          placeholder="ARN Number"
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        <div>GST – {editableData.gstNumber}</div>
+                        <div>ARN – {editableData.arnNumber}</div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Customer Details */}
+              <div className="customer-details">
+                <div className="font-semibold text-gray-900">M/s {offer.customer?.companyName || offer.company}</div>
+                {offer.customer?.address && <div className="text-gray-700">{offer.customer.address}</div>}
+                {(offer.customer?.city || offer.customer?.state) && (
+                  <div className="text-gray-700">
+                    {[offer.customer?.city, offer.customer?.state].filter(Boolean).join(' - ')}
+                  </div>
+                )}
+                {offer.contactPersonName && (
+                  <div className="text-gray-700 mt-2">
+                    <span className="font-medium">Kind Attn:</span> {offer.contactPersonName}
+                  </div>
+                )}
+              </div>
+
+              {/* Subject */}
+              <div className="subject-section">
+                {isEditMode ? (
+                  <Input
+                    value={editableData.subject}
+                    onChange={(e) => setEditableData({...editableData, subject: e.target.value})}
+                    placeholder="Subject"
+                    className="font-semibold"
+                  />
+                ) : (
+                  editableData.subject && <div className="font-semibold">Sub: {editableData.subject}</div>
+                )}
+              </div>
+
+              {/* Introduction */}
+              <div className="introduction-section">
+                {isEditMode ? (
+                  <Textarea
+                    value={editableData.introduction}
+                    onChange={(e) => setEditableData({...editableData, introduction: e.target.value})}
+                    placeholder="Introduction paragraph"
+                    rows={3}
+                  />
+                ) : (
+                  editableData.introduction && <p>{editableData.introduction}</p>
+                )}
+              </div>
+
+              {/* Machine Details */}
+              <div className="machine-details-section">
+                <h3>Machine Details:</h3>
+                <table className="data-table machine-table">
+                  <thead>
+                    <tr>
+                      <th style={{width: '60px'}}>Sr. No</th>
+                      <th>Machine Model</th>
+                      <th>Machine Sr. No</th>
+                      <th>Machine Owner</th>
+                      <th>Department</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>1</td>
+                      <td>
+                        {isEditMode ? (
+                          <Input
+                            value={editableData.machineDetails.model}
+                            onChange={(e) => setEditableData({...editableData, machineDetails: {...editableData.machineDetails, model: e.target.value}})}
+                            placeholder="Machine Model"
+                            className="h-7 text-xs"
+                          />
+                        ) : (
+                          editableData.machineDetails.model || '-'
+                        )}
+                      </td>
+                      <td>
+                        {isEditMode ? (
+                          <Input
+                            value={editableData.machineDetails.serialNumber}
+                            onChange={(e) => setEditableData({...editableData, machineDetails: {...editableData.machineDetails, serialNumber: e.target.value}})}
+                            placeholder="Serial Number"
+                            className="h-7 text-xs"
+                          />
+                        ) : (
+                          editableData.machineDetails.serialNumber || '-'
+                        )}
+                      </td>
+                      <td>
+                        {isEditMode ? (
+                          <Input
+                            value={editableData.machineDetails.owner}
+                            onChange={(e) => setEditableData({...editableData, machineDetails: {...editableData.machineDetails, owner: e.target.value}})}
+                            placeholder="Owner"
+                            className="h-7 text-xs"
+                          />
+                        ) : (
+                          editableData.machineDetails.owner || '-'
+                        )}
+                      </td>
+                      <td>
+                        {isEditMode ? (
+                          <Input
+                            value={editableData.machineDetails.department}
+                            onChange={(e) => setEditableData({...editableData, machineDetails: {...editableData.machineDetails, department: e.target.value}})}
+                            placeholder="Department"
+                            className="h-7 text-xs"
+                          />
+                        ) : (
+                          editableData.machineDetails.department || '-'
+                        )}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Parts/Items Table */}
+              <div className="items-section">
+                <div className="section-header">
+                  <h3>Parts / Items:</h3>
+                  {isEditMode && (
+                    <Button onClick={addNewItem} size="sm" variant="outline" className="print:hidden">
+                      Add Item
+                    </Button>
+                  )}
+                </div>
+                <div className="table-container">
+                <table className="data-table items-table">
+                  <thead>
+                    <tr>
+                      <th style={{width: '40px'}}>S.N</th>
+                      <th style={{width: '100px'}}>Part No</th>
+                      <th>Description</th>
+                      <th style={{width: '80px'}}>HSN Code</th>
+                      <th style={{width: '90px'}} className="text-right">Unit Price</th>
+                      <th style={{width: '50px'}} className="text-right">Qty</th>
+                      <th style={{width: '100px'}} className="text-right">Total Price</th>
+                      {isEditMode && <th style={{width: '60px'}} className="print:hidden">Action</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {editableData.items.map((item, index) => (
+                      <ItemRow
+                        key={`${item.id}-${index}`}
+                        item={item}
+                        index={index}
+                        isEditMode={isEditMode}
+                        onUpdate={updateItem}
+                        onRemove={removeItem}
+                        canRemove={editableData.items.length > 1}
+                      />
+                    ))}
+                    <tr className="total-row">
+                      <td colSpan={6} className="text-right">TOTAL</td>
+                      <td className="text-right">
+                        {formatCurrency(subtotal)}
+                      </td>
+                      {isEditMode && <td className="print:hidden"></td>}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+              {/* Page 1 Footer */}
+              <PageFooter pageNumber={1} />
+            </div>
+          </div>
+
+          {/* Page 2 - Terms and Conditions */}
+          <div className="page page-2">
+            <KardexLogo />
+
+            <div className="page-content">
+              {/* TERMS AND CONDITIONS */}
+              <div className="terms-section">
+                <h3>TERMS AND CONDITIONS</h3>
+                <ul className="terms-list">
+                  <li>GST ({editableData.gstRate}%) to be paid extra</li>
+                  <li>Quotation validity up to 30 days</li>
+                  <li>Delivery - Ex-Works Bangalore, within 14 to 18 weeks from the date of Purchase Order, packing included.</li>
+                  <li>Warranty: 3 months from the date of delivery for Electronics parts only.</li>
+                  <li>Payment: N30. Within 30 days of delivery.</li>
+              </ul>
+            </div>
+
+              {/* OTHER TERMS & CONDITIONS */}
+              <div className="other-terms">
+                <p className="section-subtitle">OTHER TERMS & CONDITIONS AS PER THE ANNEXURE ATTACHED</p>
+              </div>
+
+              {/* Please Note Section */}
+              <div className="please-note-section">
+                <h3>Please Note: -</h3>
+                <ul className="note-list">
+                <li>PO should contain Customer GST number of the place where delivery/services are requesting.</li>
+                <li>If delivery address is different than the Invoice address, then we need Delivery address GST details, HSN codes</li>
+                <li>PO should be on address as mentioned in quotation.</li>
+                <li>PO should contain Quotation reference i.e, {offer.offerReferenceNumber}.</li>
+                <li>PO should contain Kardex Ident Number as per the quotation: <span className="font-bold bg-yellow-200 px-1">KRIND/S/REL/AU00004</span></li>
+                <li>PO should contain all line items mention in quotation, if more than one item.</li>
+                <li>PO should contain delivery address and contact person's details.</li>
+                <li>PO should have company seal signature.</li>
+              </ul>
+            </div>
+
+              {/* Company Assurance */}
+              <div className="company-assurance">
+              <p>We assure you of our best services at all times and we shall not give you any room for Complaint on service.</p>
+              <p>We shall spare no effort to ensure a professional first-class after-sales service.</p>
+              
+              <p>We request you kindly release the order on</p>
+              <p className="font-semibold">M/s, {editableData.companyName.toUpperCase()}.</p>
+              <p>{editableData.companyAddress},</p>
+              <p>{editableData.companyCity}</p>
+              <p>
+                Tel   : {editableData.companyPhone} 
+                {editableData.companyFax && <> Fax  : {editableData.companyFax}</>}
+              </p>
+              <p>Website : <a href={`https://${editableData.companyWebsite}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{editableData.companyWebsite}</a></p>
+              
+              <p>If you need any clarifications/ information, please do contact the undersigned.</p>
+              <p className="font-semibold">Yours faithfully</p>
+            </div>
+
+              {/* Signature Section - Contact Person */}
+              <div className="signature-section">
+              {isEditMode ? (
+                <div className="space-y-2">
+                  <Input
+                    value={editableData.contactPersonName}
+                    onChange={(e) => setEditableData({...editableData, contactPersonName: e.target.value})}
+                    placeholder="Contact Person Name"
+                    className="h-8 text-xs"
+                  />
+                  <Input
+                    value={editableData.contactPersonPhone}
+                    onChange={(e) => setEditableData({...editableData, contactPersonPhone: e.target.value})}
+                    placeholder="Contact Person Phone"
+                    className="h-8 text-xs"
+                  />
+                  <Input
+                    value={editableData.contactPersonEmail}
+                    onChange={(e) => setEditableData({...editableData, contactPersonEmail: e.target.value})}
+                    placeholder="Contact Person Email"
+                    className="h-8 text-xs"
+                  />
+                  
+                    {/* Signature Upload Section */}
+                    <div className="signature-upload print:hidden">
+                      <label className="upload-label">Signature Image</label>
+                    
+                      {editableData.signatureImage ? (
+                        <div className="signature-preview">
+                          <img 
+                            src={editableData.signatureImage} 
+                            alt="Signature" 
+                            className="signature-image"
+                          />
+                          <Button
+                            onClick={removeSignature}
+                            size="sm"
+                            variant="ghost"
+                            className="remove-signature"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="upload-controls">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleSignatureUpload}
+                            className="hidden"
+                            id="signature-upload"
+                          />
+                          <label
+                            htmlFor="signature-upload"
+                            className="upload-button"
+                          >
+                            <Upload className="h-3 w-3" />
+                            <span>Upload Signature</span>
+                          </label>
+                          <span className="upload-hint">Max 2MB (JPG, PNG, GIF)</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="signature-display">
+                    {/* Signature Image Display */}
+                    <div className="signature-container">
+                      {editableData.signatureImage ? (
+                        <img 
+                          src={editableData.signatureImage} 
+                          alt="Signature" 
+                          className="signature-image"
+                        />
+                      ) : (
+                        <div className="signature-placeholder">
+                          <span>[Signature]</span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Contact Information - Always Display */}
+                    <div className="contact-info mt-3">
+                      <p className="contact-name font-semibold">{editableData.contactPersonName || '[Name]'}</p>
+                      <p>{editableData.contactPersonPhone || '[Phone Number]'}</p>
+                      <p className="contact-email">{editableData.contactPersonEmail || '[Email]'}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Page 2 Footer */}
+            <PageFooter pageNumber={2} />
+          </div>
+
+          {/* Page 3 - Service Products */}
+          <div className="page page-3">
+            <KardexLogo />
+
+            <div className="page-content">
+              <h2 className="page-title-secondary">KARDEX Service Products</h2>
+            
+              {/* 1) VLM Box */}
+              <div className="service-product">
+                <h3>1) VLM Box</h3>
+              
+                {/* VLM Box Banner Image */}
+                <div className="service-image">
+                  <img 
+                    src="/Picture1.jpg" 
+                    alt="Kardex VLM Box - Industrial Storage Solutions" 
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none'
+                      console.error('VLM Box image not found')
+                    }}
+                  />
+                </div>
+              
+                <p>
+                  Are you looking forward to increasing your stock capacity by 20-25% by placing the things in tidy, clean and organized manner?
+                </p>
+                <p>
+                  Our Kardex VLM BOX can help. It's an adjustable bin system designed for the Vertical Lift Module Kardex Remstar XP. 
+                  It can increase the stock capacity by 20 – 25 %. The Kardex VLM BOX is flexible in height, width and depth to create 
+                  over 300 location types – from just one box.
+                </p>
+              </div>
+
+              {/* 2) Relocations, Upgrades & Retrofits */}
+              <div className="service-product">
+                <h3>2) Relocations, Upgrades & Retrofits</h3>
+              
+                {/* Relocations & Retrofits Banner Image */}
+                <div className="service-image">
+                  <img 
+                    src="/Picture2.jpg" 
+                    alt="Kardex Relocations, Upgrades & Retrofits Services" 
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none'
+                      console.error('Relocations & Retrofits image not found')
+                    }}
+                  />
+                </div>
+              
+                <p>
+                  Do you have a Kardex Storage and Retrieval system that is no longer used optimally or may be in need of modernization?
+                </p>
+                <p>Here is an overview of the services we offer at Kardex:</p>
+                <div className="services-grid">
+                  <div>
+                    <p>• Height changes</p>
+                    <p>• Improve storage capacity</p>
+                    <p>• Replacement of picking devices</p>
+                  </div>
+                  <div>
+                    <p>• Relocation of Kardex System</p>
+                    <p>• Additional or relocation of existing work openings</p>
+                    <p>• Security and component upgrades</p>
+                  </div>
+                </div>
+                <p>• Modernizations</p>
+              </div>
+
+              {/* 3) Remote Support */}
+              <div className="service-product">
+                <h3>3) Remote Support</h3>
+              
+                {/* Remote Support Banner Image */}
+                <div className="service-image">
+                  <img 
+                    src="/Picture3.jpg" 
+                    alt="Kardex Remote Support - Industrial Equipment Monitoring" 
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none'
+                      console.error('Remote Support image not found')
+                    }}
+                  />
+                </div>
+              
+                <p>
+                  How much equipment downtime is costing your workplace?
+                </p>
+                <p>
+                  You can't afford to let unplanned equipment downtime cost your company money - especially if you can prevent it. 
+                  With our Remote Support solution, we can access machines and perform proactive maintenance and even resolve the breakdowns. 
+                  The operator can request technical help directly from the equipment's panel, send all the necessary information and get assistance.
+                </p>
+              </div>
+            </div>
+
+            {/* Page 3 Footer */}
+            <PageFooter pageNumber={3} />
+          </div>
+
+          {/* Page 4 - Service Package */}
+          <div className="page page-4">
+            <KardexLogo />
+
+            <div className="page-content">
+              <h2 className="service-package-title">Find the best service package for your requirements</h2>
+              <p className="service-package-subtitle">
+                The following range of support services provide everything your business needs to make the most of your Kardex solution.
+              </p>
+            
+              {/* Service Package Circular Diagram */}
+              <div className="service-package-diagram">
+                <img 
+                  src="/Picture4.jpg" 
+                  alt="Kardex Service Package - Productivity, Reliability & Safety, Sustainability" 
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none'
+                    console.error('Service Package Diagram image not found')
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Page 4 Footer */}
+            <PageFooter pageNumber={4} />
+          </div>
+
+          {/* Page 5 - General Terms */}
+          <div className="page page-5">
+            <KardexLogo />
+
+            <div className="page-content terms-page">
+              <h2 className="page-title-secondary">General Terms and Conditions</h2>
+              
+              <div className="terms-content">
+              <p className="mb-4">These Terms and Conditions (T&C) are structured as follows:</p>
+              <ul className="list-disc list-inside space-y-1 mb-4">
+                <li>Part A (general provisions) applies to all transactions, except where a provision of the applicable parts B and C contains deviating regulation (other than merely adding further details), which then takes precedence;</li>
+                <li>Parts B and C contain the applicable specific provisions for supply of products and software programming services with or without installation (Part B), and individual service orders and service contracts (Part C);</li>
+              </ul>
+              
+              <p className="mb-4">
+                These T&C are provided in German, English and other languages. Only the German and English texts are legally binding and authoritative. 
+                They are of equal status. Translations of these T&C into other languages are solely for convenience and are not legally binding.
+              </p>
+
+              {/* Part A: General Provisions */}
+              <h3 className="text-sm font-bold text-gray-900 mt-6 mb-3">A. General Provisions</h3>
+              
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">1. Scope of the T&C</h4>
+                <p className="mb-1">1.1. These T&C apply to all transactions between KARDEX INDIA STORAGE SOLUTIONS PRIVATE LIMITED and the customer, unless expressly otherwise agreed in writing.</p>
+                <p className="mb-1">1.2. On placement of a purchase order by the customer, these T&C are deemed to be acknowledged, and will also apply for future transactions with the customer.</p>
+                <p className="mb-1">1.3. Any deviating, contradictory or supplemental terms and conditions of the customer apply only if expressly accepted by KARDEX in writing.</p>
+                <p className="mb-1">1.4. Any amendments of and additions to the contract must be made in writing. All agreements and legally binding declarations of the parties require written confirmation by KARDEX.</p>
+                <p className="mb-1">1.5. KARDEX is entitled to amend the T&C at any time. The version current at the time of the purchase order applies. In the case of continuing contractual relationships, the draft of the amended T&C will be sent to the customer in writing no later than one month before the proposed date of their entry into force. The customer is deemed to have given its consent to the amendments if it has not rejected them by the planned date for entry into force. The amended T&C will then apply to any further transactions between the parties.</p>
+                <p className="mb-1">1.6. The general provisions of these T&C (Part A) apply to all transactions and legal relations between the parties unless otherwise stated in the specific provisions (Parts B and C) or agreed in writing.</p>
+                <p>1.7. The term "Product(s)" used in Part A is individually defined for each of Parts B and C. The meaning of this term in Part A shall therefore have the meaning as defined in the applicable Part B and C.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">2. Offers from KARDEX</h4>
+                <p className="mb-1">2.1. Unless expressly otherwise agreed, offers from KARDEX are nonbinding; otherwise, the offers are valid for 60 days. A statement by the customer is deemed to be an acceptance only if it is fully consistent with the KARDEX offer.</p>
+                <p className="mb-1">2.2. A contract is only validly concluded if KARDEX (i) confirms the order in writing or (ii) starts to perform the contract by delivering the Products or by rendering the service.</p>
+                <p className="mb-1">2.3. Under no circumstances shall silence by KARDEX with respect to a counter-offer from the customer be construed as a declaration of acceptance.</p>
+                <p>2.4. The documents relating to offers and order confirmations, such as illustrations, drawings, and weight and measurement details, are binding only if this has been expressly agreed in writing. Unless otherwise agreed in writing, brochures and catalogues are not binding.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">3. Provided Documents</h4>
+                <p>Each party retains all rights to plans and technical documents that it has provided to the other party. The receiving party acknowledges these rights, and shall not make such documents available, in full or in part, to any third party without the prior written consent of the other party, or use them outside of the scope of the purpose for which they were provided for. This also applies after termination of the business relationship as well as in the event that no contract is concluded between the parties.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">4. Prices and Payment Conditions</h4>
+                <p className="mb-1">4.1. All prices are excluding GST</p>
+                <p className="mb-1">4.2. Unless otherwise agreed in writing or specified in the subsequent specific provisions, invoices from KARDEX are payable within 30 days net from the invoice date, without any deduction. Advance and prepayments are payable within 10 days from the invoice date without any deduction.</p>
+                <p className="mb-1">4.3. A customer failing to pay by the due date is in default without a reminder, and KARDEX is entitled to charge monthly default interest in the amount of 1%, except where a different default interest rate has been specified in the contract or in the offer.</p>
+                <p className="mb-1">4.4. In the event of customer default, KARDEX is entitled to withdraw from the contract and claim back any Products already supplied and/or enter the site and render Products unusable. In addition, KARDEX is also entitled to claim direct damages and/or provide outstanding deliveries or services only against advance payment or the provision of collateral, or suspend the provision of services under other orders or service agreements for which payment has already been made.</p>
+                <p>4.5. If KARDEX becomes aware of circumstances casting doubt on the solvency of the customer, KARDEX shall have the right to demand full payment in advance or the provision of collateral.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">5. Set-off and Assignment</h4>
+                <p className="mb-1">5.1. Set-off against any counterclaims of the customer is not permitted.</p>
+                <p className="mb-1">5.2. Claims of the customer against KARDEX may be assigned only with consent from KARDEX.</p>
+                <p>5.3. The transfer of any rights and obligations under or in connection with a contract between the parties is permitted only with the other contracting party's written consent.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">6. Liability</h4>
+                <p className="mb-1">6.1. The contractual and non-contractual liability of KARDEX both for its own actions and for the actions of its auxiliary persons is limited, to the extent permitted by law, to immediate and direct damages and to a total of 20% of the contractually agreed remuneration per delivery or service concerned. In the case of continuing obligations (e.g. service contracts under Part C), liability is limited, to the extent legally permitted, per contract year, to immediate and direct damages and to the amount of 50% of the annual remuneration payable for the product or service affected by the damage. In case the liability cap in accordance with the above calculations is below EUR 10,000 in individual cases, a liability cap of EUR 10,000 applies.</p>
+                <p className="mb-1">6.2. If KARDEX or its auxiliary persons unlawfully and culpably damage items owned by the customer, KARDEX's liability shall, in deviation from section A.6.1., be governed exclusively by the provisions of article 41 et seqq. of the Swiss Code of Obligations (CO) and shall be limited, to the extent permitted by law, to EUR 500,000 per claim. KARDEX's liability for damages to the product itself or to product accessories is exclusively governed by section A.6.1.</p>
+                <p className="mb-1">6.3. Further claims not expressly mentioned in this provision and these T&C for any legal reason, in particular but not limited to claims for compensation of indirect and/or consequential damages not incurred on the product itself as well as damages due to loss of production, capacity and data including their consequences, loss of use, loss of orders, loss of profit, damage to reputation and punitive damages are excluded.</p>
+                <p className="mb-1">6.4. The contractual and non-contractual liability of KARDEX is also excluded for damages which are due to (i) incorrect information about operational and technical conditions or about the chemical and physical conditions for the use of the products provided by the customer, auxiliary persons and/or its advisors, or (ii) other actions, omissions of the customer, his auxiliary persons, advisors or third parties or other circumstances within the responsibility of the customer.</p>
+                <p className="mb-1">6.5. The above limitations and exclusions of liability do not apply (i) in cases of injury to life, body or health, (ii) in cases of intent or gross negligence on the part of KARDEX or its auxiliary persons, and (iii) for claims from product liability under product liability laws to the extent these laws are mandatory to the legal relationship between the parties.</p>
+                <p>6.6. If third parties are injured by the customer's actions or omissions or if objects of third parties are damaged or third parties are otherwise damaged and KARDEX is held liable for this, KARDEX has a right of recourse to the customer.</p>
+              </div>
+
+              </div>
+            </div>
+
+            {/* Page 5 Footer */}
+            <PageFooter pageNumber={5} />
+          </div>
+
+          {/* Page 6 - General Terms Continued */}
+          <div className="page page-6">
+            <KardexLogo />
+
+            <div className="page-content terms-page">
+              <div className="terms-content grid grid-cols-2 gap-4">
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">7. Intellectual Property</h4>
+                <p className="mb-1">7.1. The customer may not use the intellectual property of KARDEX (in particular technical protective rights, brands and other signs, designs, knowhow, copyright to software and other works) for any purposes other than those expressly agreed between the parties.</p>
+                <p className="mb-1">7.2. Without the express permission of KARDEX, the customer may not transfer or otherwise provide KARDEX Products to third parties without the attached brands.</p>
+                <p>7.3. Where KARDEX supplies software to the customer, the customer only acquires a simple, non-exclusive and non-transferrable right of use. The customer is not granted any right to edit the software.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">8. Data Protection</h4>
+                <p className="mb-1">8.1. The protection of personal data is an important priority for KARDEX. KARDEX and the customer undertake to comply at all times with the applicable legal provisions on data protection. In particular, the customer assures that KARDEX is permitted to use personal data provided to them by the customer in accordance with this section A.8., and indemnifies and holds KARDEX fully harmless from any claims by the persons affected.</p>
+                <p className="mb-1">8.2. KARDEX collects, processes and uses the customer's personal data for the performance of the contract. The customer's data will further be used for the purposes of future customer service, in which context the customer has the right to object in writing at any time. In addition, the customer's machines and operational data may be used and evaluated in anonymised form and user information on the customer's employees may be used in pseudonymized form for diagnosis and analysis purposes, and in anonymized form for the further development of KARDEX products and services (e.g. preventive maintenance). All data deriving from such analysis and diagnosis shall belong to KARDEX and may be freely used by KARDEX.</p>
+                <p className="mb-1">8.3. The personal data of the customer will only be passed on to other companies (e.g. the transport company entrusted with the delivery) within the scope of contract processing and the provision of information technology and other administrative support activities. Otherwise, personal data will not be passed on to third parties. KARDEX ensures that companies that process personal data on behalf of KARDEX comply with the applicable legal provisions on data protection and that a comparable level of data protection is guaranteed, especially in the case of transfer abroad.</p>
+                <p className="mb-1">8.4. The customer may contact KARDEX free of charge with any queries regarding the collection, processing or use of its personal data.</p>
+                <p>8.5. When using web-based products of KARDEX (such as customer portal, remote portal) personal data will be recorded. The collection, processing and use of such data can, upon customer's request, be governed by a separate data processing agreement.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">9. Confidentiality</h4>
+                <p className="mb-1">9.1. Each of the parties undertakes to keep confidential all trade secrets and confidential information brought to their knowledge by the other party, in particular, all information on customer relationships and their details, other important information such as plans, service descriptions, product specifications, information on production processes and any other confidential information made available to it and/or otherwise disclosed by the other party in written or other form, and, in particular, not to make direct or indirect use thereof in business dealings and/or for competitive purposes, and/or pass it on to third parties in business dealings and/or for competitive purposes, and/or otherwise bring it directly or indirectly to the attention of third parties, either itself or through third parties.</p>
+                <p className="mb-1">9.2. The confidentiality agreement does not apply where the information is publicly known, was already known to the other party when received, has been made available by third parties without any breach of a party's confidentiality obligation, or whose disclosure is mandatory under legal provisions, official orders or court orders, in particular judgments. The party wishing to invoke these exceptions bears the burden of proof in this regard.</p>
+                <p>9.3. The parties will place all persons whose services they use for providing services or who otherwise come into contact with confidential information as per section A.9.1 under a confidentiality obligation in accordance with sections A.9.1. and A.9.2.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">10. Severability</h4>
+                <p>If any provision of the contract, including these T&C, are or become fully or partially unenforceable or invalid under applicable law, such provision shall be ineffective only to the extent of such unenforceability or invalidity and the remaining provisions of the contract or the T&C, respectively, shall continue to be binding and in full force and effect. Such unenforceable or invalid provision shall be replaced by such a valid and enforceable provision, which the parties consider, in good faith, to match as closely as possible the invalid or unenforceable provision and attaining the same or a similar economic effect. The same applies in case a gap (Lücke) becomes evident.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">11. Office Hours</h4>
+                <p>Office hours are the usual working hours Monday - Friday, 9:00 a.m. - 6:00 p.m., with the exception of the public holidays at the registered office of KARDEX.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">12. Governing Law and Jurisdiction</h4>
+                <p className="mb-1">12.1. These T&C and the entire legal relationship between the parties shall be governed by, and construed in accordance with, Swiss law, with exclusion of the United Nations Convention on Contracts for the International Sale of Goods.</p>
+                <p>12.2. Any dispute, controversy or claim arising out or in connection with the contract between the parties and/or these T&C, including their conclusion, validity, binding effect, breach, termination or rescission, shall be resolved by arbitration in accordance with the Swiss Rules of International Arbitration of the Swiss Chambers' Arbitration Institution. Regarding the time for service of initiation pleadings, the current text of the Rules of International Arbitration applies. The venue of the arbitration procedure is the city of Zurich, Switzerland. The language of the arbitration procedure is English or German.</p>
+              </div>
+
+              </div>
+            </div>
+
+            {/* Page 6 Footer */}
+            <PageFooter pageNumber={6} />
+          </div>
+
+          {/* Pages 7-11 - Terms Sections */}
+          <div className="page page-7">
+            <KardexLogo />
+
+            <div className="page-content terms-page">
+              <div className="terms-content grid grid-cols-2 gap-4">
+              {/* Part B */}
+              <h3 className="text-sm font-bold text-gray-900 mt-6 mb-3">B. Specific Provisions for Deliveries</h3>
+              
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">1. Delivery</h4>
+                <p className="mb-1">1.1. The subject-matter of delivery contracts is the delivery of systems, machines and/or software products and individually customised software in accordance with the specifications in the order confirmation handed over to the customer by KARDEX (each individually or collectively "Product(s)").</p>
+                <p className="mb-1">1.2. Only the characteristics listed in the order confirmation are guaranteed features. Public statements, promotions and advertisements do not constitute guaranteed features of the Products. It is the customer's responsibility to assess whether or not the ordered Products are suitable for their intended purpose.</p>
+                <p className="mb-1">1.3. Any quality guarantees in addition to features guaranteed in the order confirmation must be confirmed by KARDEX in writing.</p>
+                <p>1.4. KARDEX reserves the right to make design and/or shape changes to the Products if the Product thereafter deviates only insignificantly from the agreed quality and the changes are reasonable for the customer or if the customer agrees to the change of the agreed quality.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">2. Delivery Time</h4>
+                <p className="mb-1">2.1. Delivery times are non-binding unless expressly confirmed as binding by KARDEX in writing.</p>
+                <p className="mb-1">2.2. Delivery periods start with the dispatch of the order confirmation or receipt of the order in case there is no order confirmation, but not before the receipt of any advance payment or collateral to be provided by the customer.</p>
+                <p className="mb-1">2.3. If subsequent change requests by the customer are accepted, the delivery period and delivery date are extended and postponed at least by the time required for implementation of the requested changes.</p>
+                <p className="mb-1">2.4. Delivery periods and delivery dates are met if on their expiry the Product has left the factory or notification of readiness for dispatch has been given. In the case of installation of Products, the delivery period is met by timely handover or acceptance of the installed Product. Delays beyond the control of KARDEX (e.g. failure by the customer to provide ancillary services, such as the provision of documents, permits and/or clearances to be obtained by the customer, ensuring the availability of a suitable lifting platform or opening the building) will at least result in a corresponding extension of the delivery period. KARDEX has the right to charge incurred cost from such delays.</p>
+                <p className="mb-1">2.5. Force majeure, strikes, lockouts and other impediments beyond the control of KARDEX will extend and postpone agreed delivery periods and delivery dates by no more than the duration of the impediment, to the extent that such impediments can be proven to have a significant impact on completion or delivery of the Products or associated services. The same applies where the impediments to performance occur in the operations of KARDEX' upstream suppliers. KARDEX will further not be accountable for the above circumstances if they arise during an already existing delay. KARDEX will notify the customer without delay of the beginning and end of such impediments.</p>
+                <p className="mb-1">2.6. If the dispatch of the Products is delayed at the customer's request, the customer will be invoiced as from one month after the notification of readiness for shipment issued by KARDEX for the resulting storage costs; in the case of storage in the factory, KARDEX may claim a storage fee in accordance with normal local rates. KARDEX is, however, entitled, after setting a reasonable deadline that has expired without effect, to use the Product otherwise, and to supply the customer with a similar product within a new delivery period.</p>
+                <p>2.7. Partial deliveries are permitted.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">3. Late Delivery</h4>
+                <p className="mb-1">3.1. Damages for delay limited to 0.1% per week, maximum 5% of total consideration.</p>
+                <p className="mb-1">3.2. Customer can withdraw only after two grace periods of 10 weeks each expire without success.</p>
+                <p>3.3. Further claims due to delay are excluded except in cases of willful misconduct or gross negligence.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">4. Place of Delivery; Transfer of Risk</h4>
+                <p className="mb-1">4.1. Unless agreed otherwise, Product delivered "FCA KARDEX factory" (Incoterms 2010).</p>
+                <p className="mb-1">4.2. If installation agreed, delivered "DDP customer's factory" (Incoterms 2010).</p>
+                <p className="mb-1">4.3. Delayed shipment passes risk to customer when goods ready for dispatch.</p>
+                <p>4.4. Customer must inspect for visible damage and provide documented report promptly.</p>
+              </div>
+
+              </div>
+            </div>
+
+            {/* Page 7 Footer */}
+            <PageFooter pageNumber={7} />
+          </div>
+
+          {/* Page 8 - Part B Continued */}
+          <div className="page page-8">
+            <KardexLogo />
+
+            <div className="page-content terms-page">
+              <div className="terms-content grid grid-cols-2 gap-4">
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">5. Inspection and Acceptance</h4>
+                <p className="mb-1">5.1. Customer must inspect quality and quantity immediately. Defects reported within 10 days.</p>
+                <p className="mb-1">5.2. If installation agreed, acceptance procedure required. Defects recorded in acceptance certificate.</p>
+                <p className="mb-1">5.3. Product deemed accepted 14 days after receipt or notification of readiness.</p>
+                <p className="mb-1">5.4. Minor defects do not permit refusal of acceptance.</p>
+                <p>5.5. With acceptance, KARDEX no longer liable for defects discoverable on normal inspection.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">6. Warranty</h4>
+                <p className="mb-1">6.1. KARDEX warrants delivery of Products free from defects.</p>
+                <p className="mb-1">6.2. KARDEX has right and duty to rectify defect within reasonable deadline.</p>
+                <p className="mb-1">6.3. KARDEX bears all costs necessary to rectify, repair or replace defective Product.</p>
+                <p className="mb-1">6.4. If rectification fails, customer may claim price reduction or rescind contract.</p>
+                <p className="mb-1">6.5. If shortfall in guaranteed performance less than or equal to 15%, no right to rescind or claim damages.</p>
+                <p className="mb-1">6.6. Guaranteed values adjusted if customer changes device specification.</p>
+                <p className="mb-1">6.7. Warranty rights expire 12 months after delivery.</p>
+                <p>6.8. Warranty expires if repairs by untrained personnel or inappropriate operation.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">7. Prices and Payment Conditions</h4>
+                <p className="mb-1">7.1. If legal requirements change, KARDEX may charge reasonable price increase.</p>
+                <p className="mb-1">7.2. If installation undertaken: 50% on order, 40% on delivery, 10% within 30 days of acceptance.</p>
+                <p>7.3. Currency effects may be additionally charged.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">8. Spare Parts; Maintenance Commitment</h4>
+                <p className="mb-1">8.1. Non-electronic spare parts available for 10 years, electronic parts for 6 years.</p>
+                <p>8.2. Software maintenance subject to maintenance contract.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">9. Technical Support by Customer</h4>
+                <p className="mb-1">9.1. If installation agreed, customer obliged to provide technical support at own expense including:</p>
+                <ul className="list-disc list-inside ml-4 space-y-1">
+                  <li>Installation surface in well-swept condition</li>
+                  <li>Necessary equipment and heavy tools</li>
+                  <li>Heating, lighting, site energy supply, water</li>
+                  <li>Suitable personnel and work rooms</li>
+                  <li>Transport of installation parts</li>
+                  <li>Materials for initial adjustment and testing</li>
+                  <li>Floor load capacity, level installation surface</li>
+                  <li>Energy supply, internet and data connection</li>
+                  <li>Structural prerequisites for installation</li>
+                </ul>
+                <p className="mb-1 mt-2">9.2. Technical support must ensure work begins immediately on technician arrival.</p>
+                <p className="mb-1">9.3. Customer provides assistance to KARDEX technician as needed.</p>
+                <p>9.4. If customer fails obligations, KARDEX entitled to perform at customer's expense.</p>
+              </div>
+
+              </div>
+            </div>
+
+            {/* Page 8 Footer */}
+            <PageFooter pageNumber={8} />
+          </div>
+
+          {/* Page 9 - Part C */}
+          <div className="page page-9">
+            <KardexLogo />
+
+            <div className="page-content terms-page">
+              <div className="terms-content grid grid-cols-2 gap-4">
+              {/* Part C */}
+              <h3 className="text-sm font-bold text-gray-900 mt-6 mb-3">C. Provisions for Life Cycle Services</h3>
+              
+              <h4 className="font-semibold mb-2 mt-4">C1: General Definitions</h4>
+              
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">1. Individual Service Orders</h4>
+                <p className="mb-1">1.1. Subject matter: repairs, installations, commissioning, relocation, maintenance, modifications, retrofits and upgrades.</p>
+                <p>1.2. Scope determined in order confirmation specifying services, Products, place, times, remuneration.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">2. Service Contract</h4>
+                <p className="mb-1">2.1. Subject matter: maintenance, repair work or services on Products over several years.</p>
+                <p>2.2. Scope determined by service package (BASE, FLEX or FULL Care), Products, annual fee.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">3. Response Times</h4>
+                <p>"Helpdesk Reaction Time": time from fault report to KARDEX Remote Support or telephone service begins. "OnSite Reaction Time": time to service technician arrival on site. Only reaction time during normal office hours relevant.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">4. Fault Reports</h4>
+                <p className="mb-1">4.1. All faults must be reported by telephone, online or Remote Help Request button.</p>
+                <p className="mb-1">4.2. Elimination by telephone, Remote Support or on-site technician at KARDEX discretion.</p>
+                <p className="mb-1">4.3. Reports outside agreed hours: KARDEX not obligated. If intervention occurs, double hourly rate.</p>
+                <p className="mb-1">4.4. KARDEX investigates only if properly reported and fault reproducible.</p>
+                <p>4.5. Software fault exists only if core functions impossible or severely impaired due to KARDEX software.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">5. Timing / Agreement on Dates</h4>
+                <p className="mb-1">5.1. Cancel/postpone less than 48 hours: customer bears costs.</p>
+                <p>5.2. KARDEX may invoice unnecessary travel or waiting times exceeding 30 minutes.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">6. Liability</h4>
+                <p className="mb-1">6.1. KARDEX not liable for damage from incorrect use, transmission failures, faulty execution of support instructions, attempted repairs by customer/third parties, untrained staff, delay in reaching technician, data loss.</p>
+                <p>6.2. Liability for merchandise/goods stored in Products excluded.</p>
+              </div>
+
+              </div>
+            </div>
+
+            {/* Page 9 Footer */}
+            <PageFooter pageNumber={9} />
+          </div>
+
+          {/* Page 10 - C2 Continued */}
+          <div className="page page-10">
+            <KardexLogo />
+
+            <div className="page-content terms-page">
+              <div className="terms-content grid grid-cols-2 gap-4">
+              <h4 className="font-semibold mb-2 mt-4">C2: Individual Services</h4>
+              
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">1. Individual Services Include:</h4>
+                <p className="mb-1">1.1. Installation and Commissioning by skilled technicians.</p>
+                <p className="mb-1">1.2. On-site support for repair after breakdown.</p>
+                <p className="mb-1">1.3. Remote Support or telephone support to increase operating time.</p>
+                <p className="mb-1">1.4. Relocation Service: dismantling, transport, installation at new location.</p>
+                <p className="mb-1">1.5. Training services for customer staff.</p>
+                <p className="mb-1">1.6. Maintenance and Safety Tests to ensure reliability.</p>
+                <p className="mb-1">1.7. Modification services to adapt system to changes.</p>
+                <p className="mb-1">1.8. Upgrade and Retrofit Services for latest technology.</p>
+                <p>1.9. Spare Part Delivery Service for single parts or packages.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">2. Use of Third Party Sub-Contractors</h4>
+                <p>KARDEX may use third party services. KARDEX ensures obligations fulfilled by third party.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">3. Unauthorized Intervention</h4>
+                <p>Customer must inform KARDEX of external work before service. KARDEX may request inspection or decline service.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">4. Technical Support by Customer</h4>
+                <p>Customer obliged to provide technical support at own expense. Section B.10 applies for installation/relocation.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">5. Acceptance</h4>
+                <p className="mb-1">5.1. Customer must inspect upon completion. Results recorded in acceptance certificate.</p>
+                <p className="mb-1">5.2. Deemed accepted 14 days after completion notification.</p>
+                <p className="mb-1">5.3. Minor defects do not permit refusal.</p>
+                <p>5.4. With acceptance, no liability for defects discoverable on normal inspection.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">6. Warranty</h4>
+                <p className="mb-1">6.1. KARDEX warrants faultless provision per legal regulations and recognized rules.</p>
+                <p className="mb-1">6.2. KARDEX has right and duty to rectify defect within reasonable deadline.</p>
+                <p className="mb-1">6.3. Warranty expires 6 months after acceptance.</p>
+                <p>6.4. Warranty voided by: improper use, faulty installation by customer/third party, modification/maintenance/repair/relocation by customer/third party, excessive wear, faulty operation, inappropriate materials, faulty construction, chemical/electronic effects not due to KARDEX fault, untrue indications by customer, force majeure.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">7. Remuneration</h4>
+                <p className="mb-1">7.1. Charged on time and material basis per current price list unless lump sum agreed.</p>
+                <p className="mb-1">7.2. KARDEX may charge costs for unnecessary travel.</p>
+                <p>7.3. Waiting times caused by customer chargeable.</p>
+              </div>
+
+              </div>
+            </div>
+
+            {/* Page 10 Footer */}
+            <PageFooter pageNumber={10} />
+          </div>
+
+          {/* Page 11 - C3 */}
+          <div className="page page-11">
+            <KardexLogo />
+
+            <div className="page-content terms-page">
+              <div className="terms-content grid grid-cols-2 gap-4">
+              <h4 className="font-semibold mb-2 mt-4">C3: Service Contracts</h4>
+              
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">1. Service Packages</h4>
+                <p className="mb-1">1.1. Services determined by product descriptions, technical requirements, maintenance intervals, software upgrades.</p>
+                <p className="mb-1">1.2. Maintenance during normal office hours. FLEX/FULL Care for extended hours.</p>
+                <p className="mb-1">1.3. No warranty that Product remains defect-free or functions without interruption.</p>
+                <p className="mb-1">1.4. Inclusion requires technically perfect condition. Expired warranty requires inspection first.</p>
+                <p>1.5. KARDEX Remote Support monitors Product condition. No guarantee malfunction solvable remotely.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">2. Customer Obligations</h4>
+                <p className="mb-1">2.1. Treat Product per KARDEX operating recommendations.</p>
+                <p className="mb-1">2.2. Faults reported solely by authorized person to KARDEX service technician.</p>
+                <p className="mb-1">2.3. Provide functional data transmission device for Remote Support.</p>
+                <p className="mb-1">2.4. Support technician on site with own personnel as needed.</p>
+                <p className="mb-1">2.5. Ensure Products available at agreed timeslot for service.</p>
+                <p className="mb-1">2.6. All maintenance/repairs carried out solely by KARDEX or authorized subcontractor.</p>
+                <p className="mb-1">2.7. Not change Product location without prior written notice. Upon request, KARDEX supervises relocation.</p>
+                <p className="mb-1">2.8. Actively support KARDEX in fault diagnosis via Remote Support.</p>
+                <p>2.9. Password required for Remote Support use.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">3. Remuneration for Service Contracts</h4>
+                <p className="mb-1">3.1. Annual fee depends on service package (BASE, FLEX, FULL Care).</p>
+                <p className="mb-1">3.2. First annual fee invoiced on signing, thereafter before each contract year.</p>
+                <p className="mb-1">3.3. KARDEX may increase/decrease fee. If increase exceeds 5%, customer has extraordinary termination right.</p>
+                <p className="mb-1">3.4. KARDEX may charge for unnecessary travel or if service cannot be performed due to customer.</p>
+                <p>3.5. Additional inspections invoiced separately at applicable hourly rates.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">4. Warranty</h4>
+                <p className="mb-1">4.1. KARDEX warrants faultless provision per relevant rules.</p>
+                <p className="mb-1">4.2. KARDEX has right and duty to rectify defect within reasonable deadline.</p>
+                <p className="mb-1">4.3. Customer must immediately inspect and notify defects. Warranty expires 6 months after acceptance.</p>
+                <p className="mb-1">4.4. Warranty excluded if work by non-approved maintenance companies.</p>
+                <p>4.5. No warrant for specific timeframe unless explicitly agreed. No warrant against unauthorized third-party access.</p>
+              </div>
+
+              <div className="mb-4">
+                <h4 className="font-semibold mb-2">5. Term and Termination</h4>
+                <p className="mb-1">5.1. Initial term 2 years.</p>
+                <p className="mb-1">5.2. Extended by 1 year unless terminated with 3 months notice.</p>
+                <p className="mb-1">5.3. May be terminated for cause with immediate effect if significant breach not remedied within 2 weeks.</p>
+                <p>5.4. KARDEX may exclude individual Products after 3 months notice if no longer properly maintainable.</p>
+              </div>
+
+              </div>
+            </div>
+
+            {/* Page 11 Footer */}
+            <PageFooter pageNumber={11} />
+          </div>
+        </div>
+      </div>
+
+      {/* Modern PDF/Word-friendly Styles */}
+      <style jsx global>{`
+        /* ==================== DOCUMENT CONTAINER ==================== */
+        .quotation-document {
+          max-width: 100%;
+          background: white;
+          font-family: 'Arial', 'Helvetica', sans-serif;
+        }
+
+        .document-container {
+          max-width: 210mm; /* A4 width */
+          margin: 0 auto;
+          background: white;
+        }
+
+        /* ==================== PAGE STRUCTURE ==================== */
+        .page {
+          width: 100%;
+          min-height: 297mm; /* A4 height */
+          padding: 20mm;
+          margin: 0;
+          background: white;
+          box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          page-break-after: always;
+          break-after: page;
+          position: relative;
+        }
+
+        .page:last-child {
+          page-break-after: avoid;
+          break-after: avoid;
+        }
+
+        .page-content {
+          flex: 1;
+          padding-bottom: 15mm; /* Space for footer */
+        }
+
+        /* Page 2 specific - reduce bottom padding */
+        .page-2 .page-content {
+          flex: 0 1 auto;
+          padding-bottom: 2mm;
+        }
+
+        /* Page 5 specific - reduce padding for two-column layout */
+        .page-5 .page-content {
+          padding-bottom: 10mm;
+        }
+
+        /* ==================== HEADERS & TITLES ==================== */
+        .page-title h1 {
+          text-align: center;
+          font-size: 18px;
+          font-weight: normal;
+          color: #4a5568;
+          border-bottom: 2px solid #a0a0a0;
+          padding-bottom: 8px;
+          margin: 20px 0 30px 0;
+          display: inline-block;
+          width: 100%;
+        }
+
+        .page-title-secondary {
+          text-align: center;
+          font-size: 16px;
+          font-weight: bold;
+          color: #2d3748;
+          margin: 0 0 24px 0;
+        }
+
+        /* Page 3 specific - reduce title margin */
+        .page-3 .page-title-secondary {
+          margin: 0 0 16px 0;
+        }
+
+        /* ==================== QUOTE HEADER ==================== */
+        .quote-header {
+          margin-bottom: 24px;
+        }
+
+        .header-info {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 16px;
+          margin-bottom: 16px;
+          font-size: 14px;
+        }
+
+        .customer-details {
+          margin-bottom: 16px;
+          font-size: 14px;
+        }
+
+        .subject-section {
+          margin-bottom: 16px;
+          font-size: 14px;
+        }
+
+        .introduction-section {
+          margin-bottom: 16px;
+          font-size: 14px;
+          color: #4a5568;
+        }
+
+        /* ==================== SECTIONS ==================== */
+        .machine-details-section,
+        .items-section {
+          margin-bottom: 20px;
+        }
+
+        .machine-details-section h3,
+        .items-section h3 {
+          font-size: 14px;
+          font-weight: 600;
+          color: #2d3748;
+          margin-bottom: 8px;
+        }
+
+        .section-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 8px;
+        }
+
+        /* ==================== DATA TABLES ==================== */
+        .data-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 12px;
+          margin-bottom: 16px;
+        }
+
+        .data-table th {
+          background-color: #4472C4 !important;
+          color: white !important;
+          font-weight: 600;
+          padding: 8px;
+          text-align: left;
+          border: 1px solid #374151;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+
+        .data-table th.text-right {
+          text-align: right;
+        }
+
+        .data-table td {
+          padding: 8px;
+          border: 1px solid #d1d5db;
+          text-align: left;
+        }
+
+        .data-table td.text-right {
+          text-align: right;
+        }
+
+        .total-row {
+          background-color: #f9fafb;
+          font-weight: bold;
+        }
+
+        .total-row td {
+          background-color: #f9fafb !important;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+
+        /* ==================== TERMS & CONDITIONS ==================== */
+        .terms-section {
+          margin-bottom: 6px;
+        }
+
+        .terms-section h3 {
+          font-size: 14px;
+          font-weight: 600;
+          color: #2d3748;
+          margin-bottom: 4px;
+        }
+
+        .terms-list {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+        }
+
+        .terms-list li {
+          font-size: 12px;
+          color: #4a5568;
+          margin-bottom: 2px;
+          padding-left: 10px;
+          position: relative;
+          line-height: 1.25;
+        }
+
+        .terms-list li::before {
+          content: "•";
+          position: absolute;
+          left: 0;
+          color: #4a5568;
+          font-size: 12px;
+        }
+
+        .note-list {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+        }
+
+        .note-list li {
+          font-size: 12px;
+          color: #4a5568;
+          margin-bottom: 2px;
+          line-height: 1.25;
+        }
+
+        .other-terms {
+          margin-bottom: 4px;
+        }
+
+        .other-terms .section-subtitle {
+          font-size: 12px;
+          font-weight: 600;
+          color: #2d3748;
+          margin-bottom: 4px;
+        }
+
+        .please-note-section {
+          margin-bottom: 6px;
+        }
+
+        .please-note-section h3 {
+          font-size: 14px;
+          font-weight: 600;
+          color: #2d3748;
+          margin-bottom: 4px;
+        }
+
+        .company-assurance {
+          font-size: 12px;
+          color: #4a5568;
+          margin-bottom: 4px;
+          line-height: 1.2;
+        }
+
+        .company-assurance p {
+          margin-bottom: 0.1rem;
+        }
+
+        /* ==================== SERVICE PRODUCTS ==================== */
+        .service-product {
+          margin-bottom: 16px;
+          page-break-inside: avoid;
+          break-inside: avoid;
+        }
+
+        /* Page 3 specific - more compact layout */
+        .page-3 .service-product {
+          margin-bottom: 12px;
+        }
+
+        .service-product h3 {
+          font-size: 14px;
+          font-weight: 600;
+          color: #2d3748;
+          margin-bottom: 8px;
+        }
+
+        .service-image {
+          width: 100%;
+          height: 100px;
+          margin-bottom: 8px;
+          border-radius: 4px;
+          overflow: hidden;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background-color: #f7fafc;
+        }
+
+        .service-image img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          border-radius: 4px;
+        }
+
+        .service-product p {
+          font-size: 12px;
+          color: #4a5568;
+          margin-bottom: 6px;
+          line-height: 1.35;
+        }
+
+        .services-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+          margin: 8px 0;
+          font-size: 12px;
+          color: #4a5568;
+        }
+
+        .services-grid p {
+          margin-bottom: 2px;
+        }
+
+        /* ==================== SERVICE PACKAGE ==================== */
+        .service-package-title {
+          font-size: 16px;
+          font-weight: normal;
+          color: #4a5568;
+          margin-bottom: 16px;
+        }
+
+        .service-package-subtitle {
+          font-size: 12px;
+          color: #4a5568;
+          margin-bottom: 20px;
+        }
+
+        .service-package-diagram {
+          width: 100%;
+          height: 500px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-bottom: 10px;
+        }
+
+        /* Page 4 specific - reduce padding */
+        .page-4 .page-content {
+          padding-bottom: 2mm;
+        }
+
+        .service-package-diagram img {
+          max-width: 100%;
+          max-height: 100%;
+          object-fit: contain;
+        }
+
+        /* ==================== SIGNATURE SECTION ==================== */
+        .signature-section {
+          margin-top: 4px;
+          font-size: 12px;
+        }
+
+        .signature-container {
+          margin-bottom: 3px;
+        }
+
+        .signature-image {
+          width: 90px;
+          height: 45px;
+          object-fit: contain;
+        }
+
+        .signature-placeholder {
+          width: 90px;
+          height: 45px;
+          background-color: #f7fafc;
+          border: 1px dashed #d1d5db;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 9px;
+          color: #9ca3af;
+        }
+
+        .contact-info {
+          line-height: 1.2;
+        }
+
+        .contact-info p {
+          margin-bottom: 0.1rem;
+        }
+
+        .contact-info .contact-name {
+          font-weight: 600;
+        }
+
+        .contact-info .contact-email {
+          color: #3182ce;
+        }
+
+        /* ==================== SIGNATURE UPLOAD (EDIT MODE) ==================== */
+        .signature-upload {
+          margin-top: 16px;
+        }
+
+        .upload-label {
+          display: block;
+          font-size: 12px;
+          font-weight: 500;
+          color: #4a5568;
+          margin-bottom: 8px;
+        }
+
+        .signature-preview {
+          position: relative;
+          display: inline-block;
+        }
+
+        .remove-signature {
+          position: absolute;
+          top: -8px;
+          right: -8px;
+          width: 24px;
+          height: 24px;
+          padding: 0;
+          border-radius: 50%;
+          background-color: #fed7d7;
+          color: #c53030;
+        }
+
+        .remove-signature:hover {
+          background-color: #fbb6ce;
+        }
+
+        .upload-controls {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .upload-button {
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          padding: 6px 12px;
+          border: 1px solid #d1d5db;
+          border-radius: 4px;
+          font-size: 12px;
+          background-color: white;
+          color: #4a5568;
+          transition: background-color 0.2s;
+        }
+
+        .upload-button:hover {
+          background-color: #f7fafc;
+        }
+
+        .upload-hint {
+          font-size: 12px;
+          color: #9ca3af;
+        }
+
+        /* ==================== TERMS PAGES LAYOUT ==================== */
+        .terms-page .terms-content {
+          font-size: 9px;
+          color: #4a5568;
+          line-height: 1.2;
+          text-align: justify;
+        }
+
+        /* Page 5 specific - two column layout */
+        .page-5 .terms-content {
+          column-count: 2;
+          column-gap: 16px;
+          column-fill: balance;
+        }
+
+        .page-5 .page-title-secondary {
+          margin: 0 0 6px 0;
+          font-size: 13px;
+        }
+
+        .page-5 .terms-content h3 {
+          column-span: all;
+          break-after: avoid;
+          margin: 8px 0 4px 0 !important;
+        }
+
+        .page-5 .terms-content .mb-4 {
+          margin-bottom: 4px;
+        }
+
+        .page-5 .terms-content p.mb-4 {
+          margin-bottom: 3px;
+        }
+
+        .page-5 .terms-content ul {
+          margin: 3px 0;
+        }
+
+        .page-5 .terms-content .space-y-1 {
+          gap: 0;
+        }
+
+        .page-5 .terms-content .space-y-1 li {
+          margin-bottom: 1px;
+        }
+
+        .terms-content h3 {
+          font-size: 11px;
+          font-weight: bold;
+          color: #2d3748;
+          margin: 10px 0 5px 0;
+        }
+
+        .terms-content h4 {
+          font-size: 9px;
+          font-weight: 600;
+          color: #2d3748;
+          margin: 6px 0 3px 0;
+          break-after: avoid;
+        }
+
+        .terms-content p {
+          margin-bottom: 3px;
+        }
+
+        .page-5 .terms-content p {
+          margin-bottom: 2px;
+        }
+
+        .terms-content ul {
+          margin: 8px 0;
+          padding-left: 20px;
+        }
+
+        .terms-content li {
+          margin-bottom: 4px;
+        }
+
+        .page-5 .terms-content li {
+          margin-bottom: 1px;
+        }
+
+        .page-5 .terms-content ul {
+          padding-left: 16px;
+        }
+
+        /* Pages 6-11 specific - compact two-column layout */
+        .page-6 .terms-content,
+        .page-7 .terms-content,
+        .page-8 .terms-content,
+        .page-9 .terms-content,
+        .page-10 .terms-content,
+        .page-11 .terms-content {
+          font-size: 9px;
+          line-height: 1.35;
+          gap: 14px;
+        }
+
+        .page-6 .terms-content h3,
+        .page-7 .terms-content h3,
+        .page-8 .terms-content h3,
+        .page-9 .terms-content h3,
+        .page-10 .terms-content h3,
+        .page-11 .terms-content h3 {
+          grid-column: 1 / -1;
+          font-size: 11px;
+          margin: 4px 0 3px 0;
+          font-weight: bold;
+        }
+
+        .page-6 .terms-content h4,
+        .page-7 .terms-content h4,
+        .page-8 .terms-content h4,
+        .page-9 .terms-content h4,
+        .page-10 .terms-content h4,
+        .page-11 .terms-content h4 {
+          font-size: 9.5px;
+          margin: 3px 0 2px 0;
+          font-weight: 600;
+        }
+
+        .page-6 .terms-content .mb-4,
+        .page-7 .terms-content .mb-4,
+        .page-8 .terms-content .mb-4,
+        .page-9 .terms-content .mb-4,
+        .page-10 .terms-content .mb-4,
+        .page-11 .terms-content .mb-4 {
+          margin-bottom: 4px;
+        }
+
+        .page-6 .terms-content p,
+        .page-7 .terms-content p,
+        .page-8 .terms-content p,
+        .page-9 .terms-content p,
+        .page-10 .terms-content p,
+        .page-11 .terms-content p {
+          margin-bottom: 2px;
+        }
+
+        .page-6 .terms-content .mb-1,
+        .page-7 .terms-content .mb-1,
+        .page-8 .terms-content .mb-1,
+        .page-9 .terms-content .mb-1,
+        .page-10 .terms-content .mb-1,
+        .page-11 .terms-content .mb-1 {
+          margin-bottom: 1.5px;
+        }
+
+        .page-6 .terms-content .mb-2,
+        .page-7 .terms-content .mb-2,
+        .page-8 .terms-content .mb-2,
+        .page-9 .terms-content .mb-2,
+        .page-10 .terms-content .mb-2,
+        .page-11 .terms-content .mb-2 {
+          margin-bottom: 2px;
+        }
+
+        .page-6 .terms-content .mt-4,
+        .page-7 .terms-content .mt-4,
+        .page-8 .terms-content .mt-4,
+        .page-9 .terms-content .mt-4,
+        .page-10 .terms-content .mt-4,
+        .page-11 .terms-content .mt-4 {
+          margin-top: 3px;
+        }
+
+        .page-6 .terms-content .mt-6,
+        .page-7 .terms-content .mt-6,
+        .page-8 .terms-content .mt-6,
+        .page-9 .terms-content .mt-6,
+        .page-10 .terms-content .mt-6,
+        .page-11 .terms-content .mt-6 {
+          margin-top: 4px;
+        }
+
+        .page-6 .terms-content ul,
+        .page-7 .terms-content ul,
+        .page-8 .terms-content ul,
+        .page-9 .terms-content ul,
+        .page-10 .terms-content ul,
+        .page-11 .terms-content ul {
+          margin: 2px 0;
+          padding-left: 16px;
+        }
+
+        .page-6 .terms-content li,
+        .page-7 .terms-content li,
+        .page-8 .terms-content li,
+        .page-9 .terms-content li,
+        .page-10 .terms-content li,
+        .page-11 .terms-content li {
+          margin-bottom: 1.5px;
+        }
+
+        .page-6 .page-content,
+        .page-7 .page-content,
+        .page-8 .page-content,
+        .page-9 .page-content,
+        .page-10 .page-content,
+        .page-11 .page-content {
+          padding-bottom: 8mm;
+        }
+
+        .page-6 .terms-content .space-y-1,
+        .page-7 .terms-content .space-y-1,
+        .page-8 .terms-content .space-y-1,
+        .page-9 .terms-content .space-y-1,
+        .page-10 .terms-content .space-y-1,
+        .page-11 .terms-content .space-y-1 {
+          gap: 0;
+        }
+
+        .page-6 .terms-content .space-y-1 li,
+        .page-7 .terms-content .space-y-1 li,
+        .page-8 .terms-content .space-y-1 li,
+        .page-9 .terms-content .space-y-1 li,
+        .page-10 .terms-content .space-y-1 li,
+        .page-11 .terms-content .space-y-1 li {
+          margin-bottom: 1px;
+        }
+
+        /* ==================== PAGE FOOTER ==================== */
+        .page-footer {
+          position: absolute;
+          bottom: 15mm;
+          left: 20mm;
+          right: 20mm;
+          border-top: 1px solid #d1d5db;
+          padding-top: 8px;
+        }
+
+        .footer-content {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-size: 10px;
+          color: #6b7280;
+        }
+
+        /* ==================== PRINT STYLES ==================== */
+        @media print {
+          body {
+            margin: 0;
+            padding: 0;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
+          }
+
+          .print\\:hidden {
+            display: none !important;
+          }
+
+          @page {
+            margin: 0;
+            size: A4;
+          }
+
+          .page {
+            page-break-after: always !important;
+            break-after: page !important;
+            margin: 0;
+            box-shadow: none;
+            min-height: 297mm;
+          }
+
+          .page:last-child {
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+          }
+
+          /* Ensure tables break properly */
+          .data-table {
+            page-break-inside: auto;
+          }
+
+          .data-table tr {
+            page-break-inside: avoid;
+            page-break-after: auto;
+          }
+
+          .data-table thead {
+            display: table-header-group;
+          }
+
+          .data-table tbody {
+            display: table-row-group;
+          }
+
+          /* Ensure service products don't break */
+          .service-product {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
+          /* Hide screen-only elements */
+          .signature-upload,
+          .upload-controls,
+          .remove-signature {
+            display: none !important;
+          }
+
+          /* Color preservation */
+          .data-table th {
+            background-color: #4472C4 !important;
+            color: white !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          .total-row td {
+            background-color: #f9fafb !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+        }
+
+        /* ==================== RESPONSIVE DESIGN ==================== */
+        @media screen and (max-width: 768px) {
+          .document-container {
+            max-width: 100%;
+            padding: 0 16px;
+          }
+
+          .page {
+            padding: 16px;
+            min-height: auto;
+          }
+
+          .header-info {
+            grid-template-columns: 1fr;
+            gap: 12px;
+          }
+
+          .services-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .data-table {
+            font-size: 11px;
+          }
+
+          .data-table th,
+          .data-table td {
+            padding: 6px;
+          }
+        }
+      `}</style>
     </div>
+    
   )
 }

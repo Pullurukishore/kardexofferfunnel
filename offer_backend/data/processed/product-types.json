@@ -1,0 +1,59 @@
+[
+  {
+    "month": "February",
+    "productType": "BD Spare",
+    "assignedUser": "Ashraf",
+    "hasProbability": false,
+    "probability": 0
+  },
+  {
+    "month": "March",
+    "productType": "SPP",
+    "assignedUser": "Rahul",
+    "hasProbability": false,
+    "probability": 0
+  },
+  {
+    "month": "April",
+    "productType": "Relocation",
+    "assignedUser": "Minesh",
+    "hasProbability": false,
+    "probability": 0
+  },
+  {
+    "month": "May",
+    "productType": "Software",
+    "hasProbability": false,
+    "probability": 0
+  },
+  {
+    "month": "June",
+    "productType": "BD Charges",
+    "hasProbability": false,
+    "probability": 0
+  },
+  {
+    "month": "July",
+    "productType": "Retrofit kit",
+    "hasProbability": false,
+    "probability": 0
+  },
+  {
+    "month": "August",
+    "productType": "Upgrade kit",
+    "hasProbability": false,
+    "probability": 0
+  },
+  {
+    "month": "September",
+    "productType": "Training",
+    "hasProbability": false,
+    "probability": 0
+  },
+  {
+    "month": "October",
+    "productType": "Midlife Upgrade",
+    "hasProbability": false,
+    "probability": 0
+  }
+]
